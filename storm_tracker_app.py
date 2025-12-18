@@ -1,0 +1,203 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+st.set_page_config(page_title="Storm Tracker", layout="wide")
+st.title("Storm Tracker — Avalanche Forecasting Tool")
+
+st.markdown("""
+Upload a CSV with daily SWE data (raw or pre-computed) to generate:
+- Storm totals (1/3/7/10-day)
+- Color-coded histograms with percentiles
+- Dataset summary
+- Downloads (CSV + PNG)
+""")
+
+# Sidebar inputs
+with st.sidebar:
+    st.header("Settings")
+    station_name = st.text_input("Station Name", value="Grouse Creek SNOTEL")
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    single_color_mode = st.checkbox("Single-Color Test Mode (for checking smoothness)", value=False)
+    bins_per_inch = st.slider("Bins per inch of SWE", min_value=10, max_value=50, value=25, step=5)
+    rwidth = st.slider("Bar width (rwidth)", min_value=0.8, max_value=1.0, value=0.99, step=0.01)
+    edge_lw = st.slider("Bar edge thickness", min_value=0.0, max_value=1.0, value=0.2, step=0.1)
+
+if uploaded_file is not None and station_name:
+    # -------------------------------
+    # LOAD AND CLEAN
+    # -------------------------------
+    try:
+        # Try to detect if it's raw (no header) or normal
+        try:
+            df = pd.read_csv(uploaded_file, header=None, names=['Date', 'SWE'])
+            raw_mode = True
+        except:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file)
+            raw_mode = 'delta_SWE' not in df.columns
+
+        df.replace(['', '#NA', '#VALUE!', 'NA'], np.nan, inplace=True)
+        for col in df.columns:
+            if col != 'Date':
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df = df.dropna(subset=['Date']).copy()
+
+        # -------------------------------
+        # AUTO-COMPUTE IF RAW
+        # -------------------------------
+        if raw_mode:
+            st.info("Raw SWE data detected — computing storm totals...")
+            df = df.sort_values('Date').reset_index(drop=True)
+            df['SWE_clean'] = df['SWE'].ffill()
+            df = df.set_index('Date')
+            df['delta_SWE'] = (df['SWE_clean'] - df['SWE_clean'].shift(1)).clip(lower=0)
+            df['3-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(3)).clip(lower=0)
+            df['7-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(7)).clip(lower=0)
+            df['10-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(10)).clip(lower=0)
+            df[['delta_SWE','3-day','7-day','10-day']] = df[['delta_SWE','3-day','7-day','10-day']].fillna(0)
+            df = df.drop(columns=['SWE_clean']).reset_index()
+
+        # -------------------------------
+        # DATASET SUMMARY
+        # -------------------------------
+        start_year = df['Date'].dt.year.min()
+        end_year = df['Date'].dt.year.max()
+
+        st.header("Dataset Summary")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Station:** {station_name}")
+            st.write(f"**Date range:** {df['Date'].min().date()} → {df['Date'].max().date()}")
+            st.write(f"**Total days:** {len(df):,}")
+        with col2:
+            columns = {'1-day': 'delta_SWE', '3-day': '3-day', '7-day': '7-day', '10-day': '10-day'}
+            summary_data = []
+            for period, col in columns.items():
+                miss = df[col].isna().sum()
+                zero = (df[col] == 0).sum()
+                pos = (df[col] > 0).sum()
+                summary_data.append({"Period": period, "Missing": miss, "Zero": zero, "Storm days (>0)": pos})
+            st.table(pd.DataFrame(summary_data))
+
+        # -------------------------------
+        # PLOT
+        # -------------------------------
+        st.header("Historical Storm Distributions")
+        percentiles = [50, 75, 90, 95, 99]
+        colors = ['#2c7bb6', '#abd9e9', '#ffffbf', '#fdae61', '#d7191c']
+
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+        axes = axes.ravel()
+
+        legend_patches = [plt.Rectangle((0,0),1,1, color=c) for c in colors]
+        legend_labels = [f'{p}th percentile' for p in percentiles]
+
+        for idx, (period, col) in enumerate(columns.items()):
+            ax = axes[idx]
+            storm = df[[col, 'Date']].dropna()
+            storm = storm[storm[col] > 0].copy()
+            values = storm[col]
+
+            if len(values) < 50:
+                ax.text(0.5, 0.5, 'Insufficient storm days', transform=ax.transAxes, ha='center', fontsize=14)
+                continue
+
+            p_vals = np.percentile(values, percentiles)
+            record_val = values.max()
+            record_date = storm.loc[values.idxmax(), 'Date'].strftime('%b %d, %Y')
+            n_storms = len(values)
+
+            max_plot = values.quantile(0.9995)
+            bin_width = 1.0 / bins_per_inch
+            bins = np.arange(0, max_plot + bin_width, bin_width)
+
+            if single_color_mode:
+                ax.hist(values, bins=bins, rwidth=rwidth,
+                        color='#1f77b4', edgecolor='black', linewidth=edge_lw, alpha=0.9)
+            else:
+                counts, edges, patches = ax.hist(values, bins=bins, rwidth=rwidth,
+                                                 color='lightgray', edgecolor='white', linewidth=0, zorder=2)
+                bounds = [0] + list(p_vals) + [values.max() + 0.01]
+                segment_colors = colors + ['#d7191c']
+                for i, patch in enumerate(patches):
+                    center = (edges[i] + edges[i+1]) / 2
+                    for j in range(1, len(bounds)):
+                        if center < bounds[j]:
+                            patch.set_facecolor(segment_colors[j-1])
+                            break
+                    patch.set_edgecolor('black')
+                    patch.set_linewidth(edge_lw)
+
+            for p, val, c in zip(percentiles, p_vals, colors):
+                ax.axvline(val, color=c, linestyle='--', linewidth=3, zorder=3)
+                ax.text(val, ax.get_ylim()[1] * 0.94,
+                        f'{p}th\n{val:.2f}"',
+                        rotation=90, va='top', ha='center', fontsize=11.5,
+                        bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.98,
+                                  edgecolor=c, linewidth=2.5), zorder=10)
+
+            stats_text = f"N = {n_storms:,} storm days\nRecord: {record_val:.2f}\"\n{record_date}"
+            ax.text(0.97, 0.95, stats_text, transform=ax.transAxes, va='top', ha='right', fontsize=11,
+                    bbox=dict(boxstyle="round,pad=0.8", facecolor="#f8f8f8", alpha=0.97))
+
+            ax.set_title(f"{period.upper()} SWE — Storm Days Only (>0\")\n{station_name}",
+                         fontsize=14, pad=20)
+            ax.set_xlabel("Snow Water Equivalent (inches)")
+            ax.set_ylabel("Number of Storm Events")
+            ax.grid(True, alpha=0.3)
+
+        title_text = f'{station_name}'
+        if single_color_mode:
+            title_text += " (Single-Color Test Mode)"
+        title_text += f' — Historical Storm Distributions ({start_year}–{end_year})\nOnly days with measurable snowfall (>0" SWE)'
+
+        fig.suptitle(title_text, fontsize=18, fontweight='bold', y=0.98)
+
+        if not single_color_mode:
+            fig.legend(legend_patches, legend_labels,
+                       loc='upper center', bbox_to_anchor=(0.5, 0.945),
+                       ncol=5, fancybox=True, shadow=False,
+                       title="Percentile (storm days only)", fontsize=11, title_fontsize=12)
+
+        plt.tight_layout(rect=[0, 0.04, 1, 0.96])
+        st.pyplot(fig)
+
+        # -------------------------------
+        # DOWNLOADS
+        # -------------------------------
+        st.header("Downloads")
+        col1, col2 = st.columns(2)
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        safe_name = station_name.replace(" ", "_")
+        mode = "SingleColor" if single_color_mode else "MultiColor"
+
+        # CSV
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        col1.download_button(
+            label="Download Processed CSV",
+            data=csv_data,
+            file_name=f"{safe_name}_Storm_Totals_{start_year}-{end_year}.csv",
+            mime="text/csv"
+        )
+
+        # PNG
+        fig.savefig("temp_plot.png", dpi=300, bbox_inches='tight', facecolor='white')
+        with open("temp_plot.png", "rb") as f:
+            col2.download_button(
+                label="Download Histogram PNG",
+                data=f,
+                file_name=f"{safe_name}_StormTracker_{mode}_{today}.png",
+                mime="image/png"
+            )
+
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
+        st.stop()
+
+else:
+    st.info("👆 Upload a CSV file and enter a station name to get started.")
