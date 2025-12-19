@@ -16,12 +16,12 @@ App computes storm totals, histograms, percentiles, and overlays current values.
 # Sidebar inputs
 with st.sidebar:
     st.header("Settings")
-    data_source = st.radio("Data Source", ["Upload CSV", "Fetch from SNOTEL API"])
-    station_name = st.text_input("Station Name", value="Berthoud Summit")
+    data_source = st.radio("Data Source", ["Fetch from SNOTEL API", "Upload CSV"])
+    station_name = st.text_input("Station Name", value="Turnagain Pass")
     if data_source == "Upload CSV":
         uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     else:
-        station_id = st.text_input("SNOTEL Station ID", value="1035")
+        station_id = st.text_input("SNOTEL Station ID", value="954")
         states = sorted(["AK", "AZ", "CA", "CO", "ID", "MT", "NM", "NV", "OR", "UT", "WA", "WY"])
         state = st.selectbox("State", states)
         triplet = f"{station_id}:{state}:SNTL"
@@ -126,7 +126,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
     for idx, (period, col) in enumerate(columns.items()):
         ax = axes[idx]
         storm = df[[col, 'Date']].dropna()
-        storm = storm[storm[col] > 0].copy()
+        storm = storm[storm[col] > 0].copy()  # Exclude 0 for distribution
         values = storm[col]
 
         if len(values) < 50:
@@ -167,13 +167,9 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
                     bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.98,
                               edgecolor=c, linewidth=2.5), zorder=10)
 
-        # Overlay current value as black line with 50% transparency
+        # Overlay current value as black line with 70% transparency
         current = current_values[col]
-        if current > 0:
-            ax.axvline(current, color='black', linestyle='-', linewidth=4, alpha=0.5, zorder=5)
-            ax.text(current, ax.get_ylim()[1] * 0.5, f'Current\n{current:.2f}"',
-                    rotation=90, va='center', ha='center', fontsize=12, color='black',
-                    bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.9, edgecolor='black'))
+        ax.axvline(current, color='black', linestyle='-', linewidth=4, alpha=0.7, zorder=5)
 
         stats_text = f"N = {n_storms:,} storm days\nRecord: {record_val:.2f}\"\n{record_date}"
         ax.text(0.97, 0.95, stats_text, transform=ax.transAxes, va='top', ha='right', fontsize=11,
@@ -193,11 +189,14 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
 
     fig.suptitle(title_text, fontsize=18, fontweight='bold', y=0.98)
 
+    # Legend with current value
     if not single_color_mode:
+        legend_patches.append(plt.Line2D([0], [0], color='black', linestyle='-', linewidth=4, alpha=0.7))
+        legend_labels.append('Current Storm')
         fig.legend(legend_patches, legend_labels,
                    loc='upper center', bbox_to_anchor=(0.5, 0.945),
-                   ncol=5, fancybox=True, shadow=False,
-                   title="Percentile (storm days only)", fontsize=11, title_fontsize=12)
+                   ncol=6, fancybox=True, shadow=False,
+                   title="Legend", fontsize=11, title_fontsize=12)
 
     plt.tight_layout(rect=[0, 0.04, 1, 0.96])
     st.pyplot(fig)
