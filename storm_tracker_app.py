@@ -9,21 +9,48 @@ st.set_page_config(page_title="Storm Tracker", layout="wide")
 st.title("Storm Tracker — Avalanche Forecasting Tool")
 
 st.markdown("""
-Upload a CSV or enter a SNOTEL Station ID + State to fetch full historical data.
+Upload a CSV or search by station name (or enter ID + State) to fetch full historical data.
 App computes storm totals, histograms, percentiles, and overlays current values.
 """)
+
+# Load SNOTEL master list (from your CSV)
+@st.cache_data
+def load_snotel_list():
+    # Replace with your actual CSV path or embed if deploying
+    df = pd.read_csv('SNOTEL_station_list.csv')  # Save your CSV as this name in the folder
+    # Parse ID from site_name (e.g., "Turnagain Pass (954)" → 954)
+    df['ID'] = df['site_name'].str.extract(r'\((\d+)\)', expand=False).astype(int)
+    # Create display name: "Turnagain Pass (954) - AK"
+    df['display_name'] = df['site_name'] + " (" + df['ID'].astype(str) + ") - " + df['state']
+    df = df[['display_name', 'ID', 'state']]
+    return df
+
+snotel_list = load_snotel_list()
 
 # Sidebar inputs
 with st.sidebar:
     st.header("Settings")
     data_source = st.radio("Data Source", ["Fetch from SNOTEL API", "Upload CSV"])
-    station_name = st.text_input("Station Name", value="Turnagain Pass")
     if data_source == "Upload CSV":
         uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     else:
-        station_id = st.text_input("SNOTEL Station ID", value="954")
-        states = sorted(["AK", "AZ", "CA", "CO", "ID", "MT", "NM", "NV", "OR", "UT", "WA", "WY"])
-        state = st.selectbox("State", states)
+        # Station name search (autocomplete)
+        selected_display = st.selectbox(
+            "Search Station Name",
+            options=[""] + snotel_list['display_name'].tolist(),
+            index=0,
+            help="Type to search station name"
+        )
+        if selected_display:
+            selected_row = snotel_list[snotel_list['display_name'] == selected_display].iloc[0]
+            station_name = selected_row['display_name'].split(' (')[0]  # Clean name
+            station_id = str(selected_row['ID'])
+            state = selected_row['state']
+        else:
+            station_name = st.text_input("Station Name", value="Turnagain Pass")
+            station_id = st.text_input("SNOTEL Station ID", value="954")
+            states = sorted(snotel_list['state'].unique())
+            state = st.selectbox("State", states)
         triplet = f"{station_id}:{state}:SNTL"
         st.info(f"Fetching full data for {triplet}...")
     single_color_mode = st.checkbox("Single-Color Test Mode", value=False)
@@ -52,7 +79,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
             df = df.dropna(subset=['SWE'])
             raw_mode = True
         except Exception as e:
-            st.error(f"API error: {e}. Check ID/state (e.g., 1035:CO).")
+            st.error(f"API error: {e}. Check ID/state (e.g., 954:AK).")
             st.stop()
 
     # -------------------------------
@@ -80,7 +107,6 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         for window, col in zip([1, 3, 7, 10], ['delta_SWE', '3-day', '7-day', '10-day']):
             gap_mask = df['SWE'].rolling(window).count() < window  # NaN in window
             df.loc[gap_mask, col] = 0
-        df = df.drop(columns=['SWE'])  # Drop SWE if not needed
         df = df.reset_index()
 
     # -------------------------------
@@ -98,7 +124,6 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         st.write(f"**Station:** {station_name}")
         st.write(f"**Date range:** {df['Date'].min().date()} → {df['Date'].max().date()}")
         st.write(f"**Total days:** {len(df):,}")
-        # Current storm totals
         current = df.iloc[-1]
         st.markdown(f"**Current Storm Totals**  \n1-day: {current['delta_SWE']:.2f}\" | 3-day: {current['3-day']:.2f}\" | 7-day: {current['7-day']:.2f}\" | 10-day: {current['10-day']:.2f}\"")
     with col2:
@@ -202,7 +227,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         fig.legend(legend_patches, legend_labels,
                    loc='upper center', bbox_to_anchor=(0.5, 0.945),
                    ncol=6, fancybox=True, shadow=False,
-                   title="Legend", fontsize=11, title_fontsize=12)
+                   fontsize=11, title_fontsize=12)
 
     plt.tight_layout(rect=[0, 0.04, 1, 0.96])
     st.pyplot(fig)
