@@ -56,7 +56,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
             st.stop()
 
     # -------------------------------
-    # CLEAN AND COMPUTE
+    # CLEAN AND COMPUTE — DATE-BASED WITH GAP DETECTION (NO FILLING)
     # -------------------------------
     df.replace(['', '#NA', '#VALUE!', 'NA'], np.nan, inplace=True)
     for col in df.columns:
@@ -67,14 +67,21 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
 
     if raw_mode:
         df = df.sort_values('Date').reset_index(drop=True)
-        df['SWE_clean'] = df['SWE'].ffill()
         df = df.set_index('Date')
-        df['delta_SWE'] = (df['SWE_clean'] - df['SWE_clean'].shift(1)).clip(lower=0)
-        df['3-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(3)).clip(lower=0)
-        df['7-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(7)).clip(lower=0)
-        df['10-day'] = (df['SWE_clean'] - df['SWE_clean'].shift(10)).clip(lower=0)
-        df[['delta_SWE','3-day','7-day','10-day']] = df[['delta_SWE','3-day','7-day','10-day']].fillna(0)
-        df = df.drop(columns=['SWE_clean']).reset_index()
+        # Resample to daily (no ffill — NaN for gaps)
+        df = df['SWE'].resample('D').asfreq().to_frame(name='SWE')
+        # Compute net gain only if no NaN in window (reset on gaps)
+        df['delta_SWE'] = (df['SWE'] - df['SWE'].shift(1)).clip(lower=0)
+        df['3-day'] = (df['SWE'] - df['SWE'].shift(3)).clip(lower=0)
+        df['7-day'] = (df['SWE'] - df['SWE'].shift(7)).clip(lower=0)
+        df['10-day'] = (df['SWE'] - df['SWE'].shift(10)).clip(lower=0)
+        df = df.fillna(0)
+        # Gap detection: Set totals to 0 if any NaN in window
+        for window, col in zip([1, 3, 7, 10], ['delta_SWE', '3-day', '7-day', '10-day']):
+            gap_mask = df['SWE'].rolling(window).count() < window  # NaN in window
+            df.loc[gap_mask, col] = 0
+        df = df.drop(columns=['SWE'])  # Drop SWE if not needed
+        df = df.reset_index()
 
     # -------------------------------
     # YEAR RANGE
@@ -91,6 +98,9 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         st.write(f"**Station:** {station_name}")
         st.write(f"**Date range:** {df['Date'].min().date()} → {df['Date'].max().date()}")
         st.write(f"**Total days:** {len(df):,}")
+        # Current storm totals
+        current = df.iloc[-1]
+        st.markdown(f"**Current Storm Totals**  \n1-day: {current['delta_SWE']:.2f}\" | 3-day: {current['3-day']:.2f}\" | 7-day: {current['7-day']:.2f}\" | 10-day: {current['10-day']:.2f}\"")
     with col2:
         columns = {'1-day': 'delta_SWE', '3-day': '3-day', '7-day': '7-day', '10-day': '10-day'}
         summary_data = []
@@ -107,7 +117,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
     # -------------------------------
     st.header("Historical Storm Distributions")
     percentiles = [50, 75, 90, 95, 99]
-    colors = ['#2c7bb6', '#abd9e9', '#ffffbf', '#fdae61', '#d7191c']  # Your palette
+    colors = ['#2c7bb6', '#abd9e9', '#ffffbf', '#fdae61', '#d7191c']
 
     # Hardcoded defaults
     bins_per_inch = 10
@@ -120,13 +130,12 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
     legend_patches = [plt.Rectangle((0,0),1,1, color=c) for c in colors]
     legend_labels = [f'{p}th percentile' for p in percentiles]
 
-    # Get current storm totals (last row)
-    current_values = df[columns.values()].iloc[-1]  # Last row's 1/3/7/10-day
+    current_values = df[columns.values()].iloc[-1]
 
     for idx, (period, col) in enumerate(columns.items()):
         ax = axes[idx]
         storm = df[[col, 'Date']].dropna()
-        storm = storm[storm[col] > 0].copy()  # Exclude 0 for distribution
+        storm = storm[storm[col] > 0].copy()
         values = storm[col]
 
         if len(values) < 50:
@@ -149,7 +158,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
             counts, edges, patches = ax.hist(values, bins=bins, rwidth=rwidth,
                                              color='lightgray', edgecolor='white', linewidth=0, zorder=2)
             bounds = [0] + list(p_vals) + [values.max() + 0.01]
-            segment_colors = colors + [colors[-1]]  # Last segment same as 99th
+            segment_colors = colors + [colors[-1]]
             for i, patch in enumerate(patches):
                 center = (edges[i] + edges[i+1]) / 2
                 for j in range(1, len(bounds)):
@@ -167,7 +176,6 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
                     bbox=dict(boxstyle="round,pad=0.5", facecolor='white', alpha=0.98,
                               edgecolor=c, linewidth=2.5), zorder=10)
 
-        # Overlay current value as black line with 70% transparency
         current = current_values[col]
         ax.axvline(current, color='black', linestyle='-', linewidth=4, alpha=0.7, zorder=5)
 
@@ -181,7 +189,6 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         ax.set_ylabel("Number of Storm Events")
         ax.grid(True, alpha=0.3)
 
-    # Title
     title_text = f'{station_name}'
     if single_color_mode:
         title_text += " (Single-Color Test Mode)"
@@ -189,7 +196,6 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
 
     fig.suptitle(title_text, fontsize=18, fontweight='bold', y=0.98)
 
-    # Legend with current value
     if not single_color_mode:
         legend_patches.append(plt.Line2D([0], [0], color='black', linestyle='-', linewidth=4, alpha=0.7))
         legend_labels.append('Current Storm')
