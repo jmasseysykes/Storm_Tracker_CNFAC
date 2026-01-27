@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import requests
+import os
 
 st.set_page_config(page_title="Storm Tracker", layout="wide")
 st.title("SNOTEL Storm Tracker — Avalanche Forecasting Tool")
