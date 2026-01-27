@@ -6,54 +6,78 @@ from datetime import datetime
 import requests
 
 st.set_page_config(page_title="Storm Tracker", layout="wide")
-st.title("Storm Tracker — Avalanche Forecasting Tool")
-
-st.markdown("""
-Upload a CSV or search by station name (or enter ID + State) to fetch full historical data.
-App computes storm totals, histograms, percentiles, and overlays current values.
-""")
-
-# Load SNOTEL master list (from your CSV)
+st.title("SNOTEL Storm Tracker — Avalanche Forecasting Tool")
+# Load SNOTEL master list for name lookup
 @st.cache_data
 def load_snotel_list():
-    # Replace with your actual CSV path or embed if deploying
-    df = pd.read_csv('SNOTEL_station_list.csv')  # Save your CSV as this name in the folder
+    csv_path = 'SNOTEL_station_list.csv'  # Save your attached CSV in the same folder as this script
+    if not os.path.exists(csv_path):
+        st.error("SNOTEL_station_list.csv not found in app folder. Download from NRCS or CUAHSI.")
+        return pd.DataFrame()
+    df = pd.read_csv(csv_path)
     # Parse ID from site_name (e.g., "Turnagain Pass (954)" → 954)
-    df['ID'] = df['site_name'].str.extract(r'\((\d+)\)', expand=False).astype(int)
+    df['ID'] = df['site_name'].str.extract(r'\((\d+)\)', expand=False).astype(str)
     # Create display name: "Turnagain Pass (954) - AK"
-    df['display_name'] = df['site_name'] + " (" + df['ID'].astype(str) + ") - " + df['state']
-    df = df[['display_name', 'ID', 'state']]
+    df['display_name'] = df['site_name'] + " - " + df['state']
+    df = df[['display_name', 'ID', 'state']].dropna()
     return df
 
 snotel_list = load_snotel_list()
+# Force clean strings and remove any bad rows
+snotel_list['display_name'] = snotel_list['display_name'].fillna("Unknown Station").astype(str)
+snotel_list = snotel_list[snotel_list['display_name'].str.strip() != ""]  # Drop empty
+snotel_list = snotel_list.reset_index(drop=True)
+
+st.markdown("""
+Look up a SNOTEL station by Name, ID, or State to fetch full historical data or upload a CSV of SNOTEL data.
+App computes storm totals, histograms, percentiles, and overlays current values.
+""")
 
 # Sidebar inputs
 with st.sidebar:
     st.header("Settings")
     data_source = st.radio("Data Source", ["Fetch from SNOTEL API", "Upload CSV"])
+    
     if data_source == "Upload CSV":
-        uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+        uploaded_file = st.file_uploader("Upload CSV", type=["csv"], key="upload_csv")
     else:
-        # Station name search (autocomplete)
+        # Station name lookup (autocomplete/search)
+        # Find default index for Turnagain Pass
+        turnagain_display = "Turnagain Pass (954) - AK"  # Confirm exact string from your CSV
+        default_index = 0
+        if turnagain_display in snotel_list['display_name'].values:
+            default_index = int(snotel_list[snotel_list['display_name'] == turnagain_display].index[0]) + 1  # +1 for empty "" at start
+        
         selected_display = st.selectbox(
-            "Search Station Name",
-            options=[""] + snotel_list['display_name'].tolist(),
-            index=0,
-            help="Type to search station name"
+            "Search / Select Station",
+            options=[""] + [str(name) for name in snotel_list['display_name'].tolist()],  # Force plain strings
+            index=default_index,
+            help="Type to search or select a SNOTEL station",
+            key="station_search_selectbox"
         )
+        
         if selected_display:
             selected_row = snotel_list[snotel_list['display_name'] == selected_display].iloc[0]
             station_name = selected_row['display_name'].split(' (')[0]  # Clean name
             station_id = str(selected_row['ID'])
             state = selected_row['state']
+            triplet = f"{station_id}:{state}:SNTL"
+            st.success(f"Selected: {station_name} ({triplet})")
         else:
-            station_name = st.text_input("Station Name", value="Turnagain Pass")
-            station_id = st.text_input("SNOTEL Station ID", value="954")
-            states = sorted(snotel_list['state'].unique())
-            state = st.selectbox("State", states)
-        triplet = f"{station_id}:{state}:SNTL"
-        st.info(f"Fetching full data for {triplet}...")
-    single_color_mode = st.checkbox("Single-Color Test Mode", value=False)
+            st.warning("Please select a station to fetch data.")
+            triplet = None  # Prevent fetch
+
+    # Reference date for current storm values
+    ref_date = st.date_input(
+        "Reference Date for Current Storm",
+        value=datetime.today().date(),
+        min_value=datetime(1960, 1, 1).date(),
+        max_value=datetime.today().date(),
+        key="ref_date_input"
+    )
+    ref_date_str = ref_date.strftime('%Y-%m-%d')
+    use_log_scale = st.checkbox("Log Y-Axis (better for high-percentile tails)", value=False)
+    single_color_mode = st.checkbox("Single-Color Test Mode", value=False, key="single_color_toggle")
 
 if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch from SNOTEL API" and station_id):
     # -------------------------------
@@ -68,6 +92,9 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         raw_mode = 'delta_SWE' not in df.columns
     else:
         st.info(f"Fetching full SNOTEL data for {triplet}...")
+        if triplet is None:
+            st.warning("Please select a station first.")
+            st.stop()
         try:
             url = f"https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/daily/{triplet}%7Cid=%22%22%7Cname/POR_BEGIN,POR_END/WTEQ::value,PREC::value,TMAX::value,TMIN::value,TAVG::value,PRCP::value"
             response = requests.get(url)
@@ -110,6 +137,17 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         df = df.reset_index()
 
     # -------------------------------
+    # CURRENT STORM VALUES (from user reference date)
+    # -------------------------------
+    ref_date = pd.to_datetime(ref_date_str)
+    # Filter to data up to reference date
+    historical_df = df[df['Date'] <= ref_date]
+    if historical_df.empty:
+        st.warning("Reference date before data record. Using latest available data.")
+        historical_df = df
+    current_row = historical_df.iloc[-1]
+
+    # -------------------------------
     # YEAR RANGE
     # -------------------------------
     start_year = df['Date'].dt.year.min()
@@ -124,8 +162,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         st.write(f"**Station:** {station_name}")
         st.write(f"**Date range:** {df['Date'].min().date()} → {df['Date'].max().date()}")
         st.write(f"**Total days:** {len(df):,}")
-        current = df.iloc[-1]
-        st.markdown(f"**Current Storm Totals**  \n1-day: {current['delta_SWE']:.2f}\" | 3-day: {current['3-day']:.2f}\" | 7-day: {current['7-day']:.2f}\" | 10-day: {current['10-day']:.2f}\"")
+        st.markdown(f"**Current Storm Totals (as of {ref_date.date()})**  \n1-day: {current_row['delta_SWE']:.2f}\" | 3-day: {current_row['3-day']:.2f}\" | 7-day: {current_row['7-day']:.2f}\" | 10-day: {current_row['10-day']:.2f}\"")
     with col2:
         columns = {'1-day': 'delta_SWE', '3-day': '3-day', '7-day': '7-day', '10-day': '10-day'}
         summary_data = []
@@ -155,7 +192,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
     legend_patches = [plt.Rectangle((0,0),1,1, color=c) for c in colors]
     legend_labels = [f'{p}th percentile' for p in percentiles]
 
-    current_values = df[columns.values()].iloc[-1]
+    current_values = current_row
 
     for idx, (period, col) in enumerate(columns.items()):
         ax = axes[idx]
@@ -172,7 +209,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         record_date = storm.loc[values.idxmax(), 'Date'].strftime('%b %d, %Y')
         n_storms = len(values)
 
-        max_plot = values.quantile(0.9995)
+        max_plot = values.quantile(1.0)
         bin_width = 1.0 / bins_per_inch
         bins = np.arange(0, max_plot + bin_width, bin_width)
 
@@ -183,7 +220,7 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
             counts, edges, patches = ax.hist(values, bins=bins, rwidth=rwidth,
                                              color='lightgray', edgecolor='white', linewidth=0, zorder=2)
             bounds = [0] + list(p_vals) + [values.max() + 0.01]
-            segment_colors = colors + [colors[-1]]
+            segment_colors = colors + [colors[-1]]  # Repeat red for tail
             for i, patch in enumerate(patches):
                 center = (edges[i] + edges[i+1]) / 2
                 for j in range(1, len(bounds)):
@@ -192,6 +229,13 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
                         break
                 patch.set_edgecolor('black')
                 patch.set_linewidth(edge_lw)
+
+            # Force the bin with the record value to be danger-red with thick black border
+            record_bin_idx = np.searchsorted(edges, record_val) - 1
+            if 0 <= record_bin_idx < len(patches):
+                patches[record_bin_idx].set_facecolor('black')  # Darker red for danger
+                patches[record_bin_idx].set_edgecolor('#c1121f')
+                patches[record_bin_idx].set_linewidth(1.5)  # Thick border to stand out
 
         for p, val, c in zip(percentiles, p_vals, colors):
             ax.axvline(val, color=c, linestyle='--', linewidth=3, zorder=3)
@@ -208,12 +252,18 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         ax.text(0.97, 0.95, stats_text, transform=ax.transAxes, va='top', ha='right', fontsize=11,
                 bbox=dict(boxstyle="round,pad=0.8", facecolor="#f8f8f8", alpha=0.97))
 
-        ax.set_title(f"{period.upper()} SWE — Storm Days Only (>0\")\n{station_name}",
+        ax.set_title(f"{period.upper()} SWE — Storm Days Only (>0\")",
                      fontsize=14, pad=20)
         ax.set_xlabel("Snow Water Equivalent (inches)")
         ax.set_ylabel("Number of Storm Events")
         ax.grid(True, alpha=0.3)
 
+        # Apply log scale if toggled
+        if use_log_scale:
+            ax.set_yscale('log')
+            ax.set_ylabel("Number of Storm Events (log scale)")
+
+    # Title
     title_text = f'{station_name}'
     if single_color_mode:
         title_text += " (Single-Color Test Mode)"
@@ -225,9 +275,9 @@ if (data_source == "Upload CSV" and uploaded_file) or (data_source == "Fetch fro
         legend_patches.append(plt.Line2D([0], [0], color='black', linestyle='-', linewidth=4, alpha=0.7))
         legend_labels.append('Current Storm')
         fig.legend(legend_patches, legend_labels,
-                   loc='upper center', bbox_to_anchor=(0.5, 0.945),
-                   ncol=6, fancybox=True, shadow=False,
-                   fontsize=11, title_fontsize=12)
+                   loc='upper center', bbox_to_anchor=(0.5, 0.935),
+                   ncol=6, fancybox=True, frameon=False, shadow=False,
+                   fontsize=12, title_fontsize=12)
 
     plt.tight_layout(rect=[0, 0.04, 1, 0.96])
     st.pyplot(fig)
