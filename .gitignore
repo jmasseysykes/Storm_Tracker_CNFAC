@@ -31,7 +31,11 @@ __pycache__/
 *.ipynb
 
 # Data / generated files
+# Ignore generated/output CSVs (keep essential ones like station lists)
 *.csv
+!SNOTEL_station_list.csv
+output/*.csv
+data/*.csv
 *.xlsx
 *.png
 *.log
