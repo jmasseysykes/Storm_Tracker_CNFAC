@@ -4,7 +4,7 @@ Avalanche forecasting tool that visualizes historic and current storm totals fro
 
 **Live app**: https://avystormtracker.com
 
-![Screenshot of Storm Tracker app showing histogram and current storm totals](https://github.com/jmasseysykes/Storm_Tracker_CNFAC/raw/main/screenshot.png)
+<image-card alt="Storm Tracker app screenshot" src="https://github.com/jmasseysykes/Storm_Tracker_CNFAC/raw/main/StormTracker_Screenshot.png" ></image-card>)
 
 ## Features
 - Fetches daily SNOTEL data directly from NRCS Report Generator (public API).
