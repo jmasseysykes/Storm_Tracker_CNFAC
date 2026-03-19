@@ -8,6 +8,7 @@ cat << 'EOF' >> .gitignore
 *.csv
 *.xlsx
 *.png
+!StormTracker_Screenshot.png
 *.log
 temp_plot.png
 
