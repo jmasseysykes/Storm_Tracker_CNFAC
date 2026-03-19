@@ -7,6 +7,23 @@ import requests
 import os
 import gc
 
+# Google Analytics 4 (GA4) tracking - inject once at the top
+GA_MEASUREMENT_ID = "G-FEZMNSLQ1R"  # Your ID from Google
+
+ga_script = f"""
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', '{GA_MEASUREMENT_ID}');
+</script>
+"""
+
+# Inject the GA script (height=0 hides it)
+st.components.v1.html(ga_script, height=0)
+
 st.set_page_config(page_title="Storm Tracker", layout="wide")
 st.title("SNOTEL Storm Tracker — Avalanche Forecasting Tool")
 
