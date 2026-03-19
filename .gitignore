@@ -1,0 +1,52 @@
+# Create or append to .gitignore
+cat << 'EOF' >> .gitignore
+# Jupyter / notebooks
+*.ipynb
+*.ipynb_checkpoints/
+
+# Data / generated
+*.csv
+*.xlsx
+*.png
+*.log
+temp_plot.png
+
+# Old / test scripts
+*test.py
+*v1.*.py
+untitled.py
+
+# R / misc
+.Rhistory
+EOF# Python / temp
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+
+# Jupyter / notebooks
+*.ipynb_checkpoints/
+*.ipynb
+
+# Data / generated files
+*.csv
+*.xlsx
+*.png
+*.log
+data/
+output/
+temp/
+plots/
+
+# Old/test scripts
+*test.py
+*v1.*.py
+untitled.py
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
