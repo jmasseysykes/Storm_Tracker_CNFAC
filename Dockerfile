@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     gfortran \
     libpng-dev \
     libfreetype6-dev \
-    ca-certificates \          # ← ADD THIS LINE
+    ca-certificates \         
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python deps first (layer caching)
