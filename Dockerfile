@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libfreetype6-dev \
     ca-certificates \         
+    && update-ca-certificates \   
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install Python deps first (layer caching)
