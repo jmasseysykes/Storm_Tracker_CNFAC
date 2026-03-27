@@ -6,6 +6,7 @@ from datetime import datetime
 import requests
 import os
 import gc
+import certifi
 
 # Google Analytics 4 tracking
 GA_MEASUREMENT_ID = "G-FEZMNSLQ1R"
@@ -139,7 +140,8 @@ def load_and_process_station_data(data_source, uploaded_file, triplet, ref_date_
             return None
         try:
             url = f"https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/daily/{triplet}%7Cid=%22%22%7Cname/POR_BEGIN,POR_END/WTEQ::value,PREC::value,TMAX::value,TMIN::value,TAVG::value,PRCP::value"
-            response = requests.get(url)
+            #response = requests.get(url)
+            response = requests.get(url, verify=False)   # Temporary bypass for SSL issue
             response.raise_for_status()
             df = pd.read_csv(pd.io.common.StringIO(response.text), comment='#', skip_blank_lines=True)
             df.columns = ['Date', 'SWE', 'PREC', 'TMAX', 'TMIN', 'TAVG', 'PRCP']
