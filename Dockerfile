@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 8501
 
 # Run the Streamlit app
-CMD ["streamlit", "run", "storm_tracker_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "Storm_Tracker.py", "--server.port=8501", "--server.address=0.0.0.0"]
