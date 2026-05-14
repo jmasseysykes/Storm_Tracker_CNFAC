@@ -29,6 +29,13 @@ st.caption("Storm Tracker v1.0 • Last updated: March 2026 • Stable & in acti
 
 st.title("SNOTEL Storm Tracker — Avalanche Forecasting Tool")
 
+st.set_page_config(page_title="CNFAC Storm Tracker", layout="wide")
+
+st.markdown("""
+**New!** [Avalanche Destructive Size Estimator](pages/1_Avalanche_D_Size.py)  
+Estimate D1–D5 size from avalanche mass (quick field method or SNOTEL-backed).
+""")
+
 # Load SNOTEL master list for name lookup
 @st.cache_data
 def load_snotel_list():
