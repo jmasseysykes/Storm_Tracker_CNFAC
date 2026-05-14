@@ -44,10 +44,10 @@ with tab_quick:
     with col1:
         crown_width = st.number_input(f"Crown Width ({unit_length})", 
                                       value=250.0 if use_imperial else 80.0, 
-                                      min_value=1.0, step=1.0)
+                                      min_value=1.0, step=10.0)
         slab_height = st.number_input(f"Slab Height — crown to stauchwall ({unit_length})", 
                                       value=500.0 if use_imperial else 150.0, 
-                                      min_value=1.0, step=1.0)
+                                      min_value=1.0, step=10.0)
         depth = st.number_input(f"Slab thickness / burial depth ({unit_length})", 
                                 value=2.5 if use_imperial else 0.8, 
                                 min_value=0.1, step=0.1)
@@ -57,6 +57,7 @@ with tab_quick:
             f"Slab Area ({unit_area}) — optional",
             value=crown_width * slab_height,
             min_value=10.0,
+            step=10.0,
             help="Auto-calculated from Crown Width × Slab Height. Override this if you drew a polygon, used GPS, or have a better area measurement."
         )
     
@@ -125,18 +126,21 @@ with tab_quick:
             st.caption(f"Original inputs: Crown Width {crown_width:.0f} m × Slab Height {slab_height:.0f} m × Depth {depth:.1f} m")
         st.caption(calcs.get_dsize_range_string(mass_tonnes))
         
-        # Store for saving
+        # === FULL DATA FOR RESEARCH DATABASE ===
         st.session_state.quick_inputs = {
             "method": "Quick",
             "area_m2": area_m2,
+            "volume_m3": volume_m3,
+            "mass_tonnes": mass_tonnes,
+            "calculated_d_size": mid_d,
+            "unc_low": low_d,
+            "unc_high": high_d,
+            "crown_width_m": crown_width_m,
+            "slab_height_m": slab_height_m,
             "depth_m": depth_m,
             "hardness": hardness,
             "grain": grain,
             "density_kgm3": density,
-            "mass_tonnes": mass_tonnes,
-            "d_size": mid_d,
-            "unc_low": low_d,
-            "unc_high": high_d,
         }
         
 # ====================== DETAILED SNOTEL METHOD ======================
@@ -157,8 +161,8 @@ with tab_detailed:
         station_options = stations_df['display_name'].tolist()
         
         if "station_debug_shown" not in st.session_state:
-            st.success(f"✅ Loaded **{len(station_options):,}** SNOTEL stations")
-            st.info("Using same station list & triplet logic as Storm Tracker")
+            #st.success(f"✅ Loaded **{len(station_options):,}** SNOTEL stations")
+            #st.info("Using same station list & triplet logic as Storm Tracker")
             st.session_state.station_debug_shown = True
             
     except Exception as e:
@@ -221,9 +225,11 @@ with tab_detailed:
                     st.error(f"❌ SNOTEL error: {slab_data['error']}")
                 else:
                     slab_swe_mm = slab_data["slab_swe_mm"]
-                    adjusted_swe_m = (slab_swe_mm * (1 + swe_adjust / 100.0)) / 1000.0
+                    adjusted_swe_mm = slab_swe_mm * (1 + swe_adjust / 100.0)
+                    adjusted_swe_m = adjusted_swe_mm / 1000.0
                     
                     area_m2 = area_detailed_input * conv_area
+                    volume_m3 = area_m2 * burial_depth_ref * conv_length   # optional reference volume
                     mass_tonnes = area_m2 * adjusted_swe_m
                     
                     mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
@@ -235,84 +241,131 @@ with tab_detailed:
                     )
                     
                     st.success(f"**Estimated D-Size: {mid_d}**  (uncertainty range: **{low_d} – {high_d}**)")
-                    st.info(f"**Slab SWE: {slab_swe_mm:.1f} mm  ({slab_swe_mm/25.4:.1f} inches)** | Mass: **{mass_tonnes:,.0f} tonnes**")
-                    st.caption(f"Weak: {slab_data['swe_weak_mm']:.1f} mm ({slab_data['swe_weak_inches']:.1f} in) | "
-                               f"Release: {slab_data['swe_release_mm']:.1f} mm ({slab_data['swe_release_inches']:.1f} in)")
+                    st.info(f"**Slab SWE: {adjusted_swe_mm:.1f} mm** | Mass: **{mass_tonnes:,.0f} tonnes**")
+                    st.caption(f"Weak: {slab_data['swe_weak_mm']:.1f} mm | Release: {slab_data['swe_release_mm']:.1f} mm")
                     
-                    # Store for saving
+                    # === FULL DATA FOR RESEARCH DATABASE ===
                     st.session_state.detailed_inputs = {
                         "method": "Detailed",
                         "area_m2": area_m2,
+                        "volume_m3": volume_m3,                    # reference only
+                        "mass_tonnes": mass_tonnes,
+                        "calculated_d_size": mid_d,
+                        "unc_low": low_d,
+                        "unc_high": high_d,
                         "weak_layer_date": str(weak_date),
                         "release_date": str(release_date),
                         "snotel_station": station_name,
                         "snotel_triplet": station_triplet,
                         "slab_swe_mm": slab_swe_mm,
-                        "swe_adjust_pct": swe_adjust,
-                        "mass_tonnes": mass_tonnes,
-                        "d_size": mid_d,
-                        "unc_low": low_d,
-                        "unc_high": high_d
+                        "adjusted_swe_mm": adjusted_swe_mm,
+                        "burial_depth_ref_m": burial_depth_ref * conv_length,
                     }
             except Exception as e:
                 st.error(f"Could not fetch SNOTEL data: {e}")
             
-# ====================== SAVE BUTTON (shared across tabs) ======================
+# ====================== SAVE BUTTON ======================
 st.divider()
-save_col1, save_col2 = st.columns([3, 1])
+st.subheader("Save to Research Database")
 
-with save_col1:
-    observer = st.text_input("Observer Name", value="Your Name", placeholder="John Doe")
-    location = st.text_input("Avalanche Location / Notes", placeholder="E.g. Chugach Mtns, AK — crown visible from highway")
-    
-    if st.button("💾 Save Avalanche to Log", type="secondary", use_container_width=True):
-        inputs = st.session_state.get("quick_inputs", {}) or st.session_state.get("detailed_inputs", {})
-        if inputs:
-            data = {
-                "timestamp": pd.Timestamp.now().isoformat(),
-                "observer": observer,
-                "location": location,
-                "method": inputs.get("method"),
-                "area_m2": inputs.get("area_m2"),
-                "mass_tonnes": inputs.get("mass_tonnes"),
-                "d_size": inputs.get("d_size"),
-                "unc_low": inputs.get("unc_low"),
-                "unc_high": inputs.get("unc_high"),
-                "notes": f"Depth: {inputs.get('depth_m', 'N/A')}m | Hardness/Grain: {inputs.get('hardness', '')} {inputs.get('grain', '')}" if inputs.get("method") == "Quick" else
-                         f"Weak: {inputs.get('weak_layer_date')} | Release: {inputs.get('release_date')} | Station: {inputs.get('snotel_station', '')}"
-            }
-            db.save_avalanche(data)
-            st.success("✅ Avalanche saved to database!")
-            for key in ["quick_inputs", "detailed_inputs"]:
-                st.session_state.pop(key, None)
-        else:
-            st.warning("Calculate an avalanche first before saving.")
+observer = st.text_input("Observer Name", value="Your Name")
+location = st.text_input("Avalanche Location / Notes", placeholder="e.g. Chugach Mtns, AK — crown visible from highway")
 
+field_d_size_options = ["D1", "D1.5", "D2", "D2.5", "D3", "D3.5", "D4", "D4.5", "D5"]
+field_assessed_d_size = st.selectbox("Field-Assessed D-Size (what you think it actually was)", field_d_size_options)
+
+if st.button("💾 Save Avalanche to Research Database", type="primary", use_container_width=True):
+    inputs = st.session_state.get("quick_inputs", {}) or st.session_state.get("detailed_inputs", {})
+    if inputs:
+        data = {
+            "timestamp": pd.Timestamp.now().isoformat(),
+            "observer": observer,
+            "location": location,
+            "method": inputs.get("method"),
+            "area_m2": inputs.get("area_m2"),
+            "volume_m3": inputs.get("volume_m3"),
+            "mass_tonnes": inputs.get("mass_tonnes"),
+            # Use new key, with fallback for any old test entries
+            "calculated_d_size": inputs.get("calculated_d_size") or inputs.get("d_size"),
+            "unc_low": inputs.get("unc_low"),
+            "unc_high": inputs.get("unc_high"),
+            "field_assessed_d_size": field_assessed_d_size,
+            # Quick method
+            "crown_width_m": inputs.get("crown_width_m"),
+            "slab_height_m": inputs.get("slab_height_m"),
+            "depth_m": inputs.get("depth_m"),
+            "hardness": inputs.get("hardness"),
+            "grain": inputs.get("grain"),
+            "density_kgm3": inputs.get("density_kgm3"),
+            # Detailed SNOTEL
+            "weak_layer_date": inputs.get("weak_layer_date"),
+            "release_date": inputs.get("release_date"),
+            "snotel_station": inputs.get("snotel_station"),
+            "snotel_triplet": inputs.get("snotel_triplet"),
+            "slab_swe_mm": inputs.get("slab_swe_mm"),
+            "adjusted_swe_mm": inputs.get("adjusted_swe_mm"),
+            "burial_depth_ref_m": inputs.get("burial_depth_ref_m"),
+            "notes": "",
+        }
+        db.save_avalanche(data)
+        st.success("✅ Avalanche saved to research database!")
+        # Clear session state
+        for key in ["quick_inputs", "detailed_inputs"]:
+            st.session_state.pop(key, None)
+    else:
+        st.warning("Calculate an avalanche first before saving.")
+        
 # ====================== VIEW LOG TAB ======================
 with tab_log:
-    st.subheader("Saved Avalanches")
+    st.subheader("📋 Research Database — Saved Avalanches")
     log_df = db.load_avalanche_log()
     
     if log_df.empty:
-        st.info("No avalanches saved yet. Calculate and save some to build the database!")
+        st.info("No avalanches saved yet. Calculate and save some entries to build the database!")
     else:
+        # Logical column order for research use
+        preferred_order = [
+            "timestamp", "observer", "location", "method",
+            "calculated_d_size", "field_assessed_d_size",
+            "mass_tonnes", "volume_m3", "area_m2",
+            "crown_width_m", "slab_height_m", "depth_m",
+            "hardness", "grain", "density_kgm3",
+            "snotel_station", "weak_layer_date", "release_date",
+            "slab_swe_mm", "adjusted_swe_mm", "burial_depth_ref_m",
+            "unc_low", "unc_high", "notes"
+        ]
+        
+        # Only show columns that actually exist
+        available_cols = [col for col in preferred_order if col in log_df.columns]
+        display_df = log_df[available_cols].copy()
+        
+        # Nice formatting
+        if "timestamp" in display_df.columns:
+            display_df["timestamp"] = pd.to_datetime(display_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+        
         st.dataframe(
-            log_df,
+            display_df,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "timestamp": st.column_config.DatetimeColumn("Date", format="YYYY-MM-DD HH:mm"),
+                "timestamp": st.column_config.TextColumn("Date/Time"),
                 "mass_tonnes": st.column_config.NumberColumn("Mass (tonnes)", format="%.0f"),
+                "volume_m3": st.column_config.NumberColumn("Volume (m³)", format="%.0f"),
+                "area_m2": st.column_config.NumberColumn("Area (m²)", format="%.0f"),
+                "depth_m": st.column_config.NumberColumn("Depth (m)", format="%.2f"),
+                "slab_swe_mm": st.column_config.NumberColumn("Slab SWE (mm)", format="%.1f"),
+                "adjusted_swe_mm": st.column_config.NumberColumn("Adjusted SWE (mm)", format="%.1f"),
             }
         )
         
-        csv = log_df.to_csv(index=False).encode()
         st.download_button(
-            label="📥 Download Full Log as CSV",
-            data=csv,
-            file_name="avalanche_log.csv",
+            label="📥 Download Full Research Database as CSV",
+            data=log_df.to_csv(index=False).encode(),
+            file_name="avalanche_research_log.csv",
             mime="text/csv"
         )
+        
+        st.caption(f"Total records in database: **{len(log_df)}**")
 
 # ====================== FOOTER ======================
 st.divider()
