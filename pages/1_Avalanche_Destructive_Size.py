@@ -14,6 +14,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# === LARGER, MORE VISIBLE TAB FONTS ===
+st.markdown("""
+    <style>
+        .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+            font-size: 20px !important;     /* Change this number if you want bigger/smaller */
+            font-weight: 600 !important;
+            padding: 8px 0 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("Avalanche Destructive Size Estimator")
 st.caption("CNFAC Avalanche Tools — ISSW Project with Erich Peitzsch, Zach Guy, Ron Simenhois, and Bruce Jamieson")
 
@@ -29,11 +40,14 @@ unit_area = "ft²" if use_imperial else "m²"
 conv_length = 0.3048 if use_imperial else 1.0          # ft → m
 conv_area = conv_length ** 2                            # ft² → m²
 
-# ====================== DSIZE CLASSIFACTION PLOT ======================
-
-st.image("dsize_yellow_orange_red_final.png",   # or call dsize_plot.plot_dsize_reference() if you prefer live
-         caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
-         use_container_width=True)
+# === D-SIZE CLASSIFICATION CHART (collapsible) ===
+with st.expander("📊 View D-Size Classification Chart — Mass Ranges and Typical Values", expanded=False):
+    st.image(
+        "dsize_yellow_orange_red_final.png",
+        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
+        use_container_width=False,
+        width=900                    # comfortable size on desktop
+    )
 
 # ====================== TABS ======================
 tab_quick, tab_detailed, tab_log = st.tabs([
@@ -69,8 +83,8 @@ with tab_quick:
     with st.expander("🔧 Advanced Uncertainty (per input) — click to expand", expanded=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            unc_lw = st.slider("Crown Width / Slab Height / Area uncertainty %", 5, 40, 25, key="quick_lw")
-            unc_depth = st.slider("Depth / Slab thickness uncertainty %", 5, 40, 25, key="quick_depth")
+            unc_lw = st.slider("Crown Width / Slab Height / Area uncertainty %", 5, 50, 25, key="quick_lw")
+            unc_depth = st.slider("Depth / Slab thickness uncertainty %", 5, 50, 25, key="quick_depth")
         with col_b:
             unc_density = st.slider("Density (hardness/grain) uncertainty %", 5, 50, 25, key="quick_density")
     
@@ -133,7 +147,7 @@ with tab_quick:
         }
         
         fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
-        st.pyplot(fig)
+        st.pyplot(fig, use_container_width=False)
         
 # ====================== DETAILED SNOTEL METHOD ======================
 with tab_detailed:
@@ -176,9 +190,9 @@ with tab_detailed:
     with st.expander("🔧 Advanced Uncertainty (per input)", expanded=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            unc_area = st.slider("Area uncertainty %", 5, 40, 15, key="detailed_area")
+            unc_area = st.slider("Area uncertainty %", 5, 50, 15, key="detailed_area")
         with col_b:
-            unc_swe = st.slider("SWE difference uncertainty %", 5, 40, 10, key="detailed_swe")
+            unc_swe = st.slider("SWE difference uncertainty %", 5, 50, 10, key="detailed_swe")
     
     if st.button("Calculate Detailed SNOTEL Method", type="primary", use_container_width=True):
         if not station_triplet:
@@ -225,7 +239,7 @@ with tab_detailed:
                     
                     # Dynamic chart with accurate uncertainty band
                     fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
-                    st.pyplot(fig)
+                    st.pyplot(fig, use_container_width=False)
                     
                     # Store for research database
                     st.session_state.detailed_inputs = {
