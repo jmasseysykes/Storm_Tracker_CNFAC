@@ -4,6 +4,7 @@ from datetime import date
 import avalanche_calcs as calcs
 import snotel_utils as snotel
 import avalanche_db as db
+import dsize_plot
 
 # ====================== PAGE CONFIG ======================
 st.set_page_config(
@@ -14,7 +15,7 @@ st.set_page_config(
 )
 
 st.title("Avalanche Destructive Size Estimator")
-st.caption("CNFAC Avalanche Tools — ISSW Project with Erich Peitzsch, Zach Guy & Ron Simenhois")
+st.caption("CNFAC Avalanche Tools — ISSW Project with Erich Peitzsch, Zach Guy, Ron Simenhois, and Bruce Jamieson")
 
 # ====================== UNIT SYSTEM TOGGLE ======================
 use_imperial = st.toggle(
@@ -27,6 +28,12 @@ unit_length = "ft" if use_imperial else "m"
 unit_area = "ft²" if use_imperial else "m²"
 conv_length = 0.3048 if use_imperial else 1.0          # ft → m
 conv_area = conv_length ** 2                            # ft² → m²
+
+# ====================== DSIZE CLASSIFACTION PLOT ======================
+
+st.image("dsize_yellow_orange_red_final.png",   # or call dsize_plot.plot_dsize_reference() if you prefer live
+         caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
+         use_container_width=True)
 
 # ====================== TABS ======================
 tab_quick, tab_detailed, tab_log = st.tabs([
@@ -42,55 +49,32 @@ with tab_quick:
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        crown_width = st.number_input(f"Crown Width ({unit_length})", 
-                                      value=250.0 if use_imperial else 80.0, 
-                                      min_value=1.0, step=10.0)
-        slab_height = st.number_input(f"Slab Height — crown to stauchwall ({unit_length})", 
-                                      value=500.0 if use_imperial else 150.0, 
-                                      min_value=1.0, step=10.0)
-        depth = st.number_input(f"Slab thickness / burial depth ({unit_length})", 
-                                value=2.5 if use_imperial else 0.8, 
-                                min_value=0.1, step=0.1)
+        crown_width = st.number_input(f"Crown Width ({unit_length})", value=250.0 if use_imperial else 80.0, min_value=1.0, step=1.0)
+        slab_height = st.number_input(f"Slab Height — crown to stauchwall ({unit_length})", value=500.0 if use_imperial else 150.0, min_value=1.0, step=1.0)
+        depth = st.number_input(f"Slab thickness / burial depth ({unit_length})", value=2.5 if use_imperial else 0.8, min_value=0.1, step=0.1)
         
-        # === CLEAR OPTIONAL AREA FIELD ===
-        area_quick_input = st.number_input(
-            f"Slab Area ({unit_area}) — optional",
-            value=crown_width * slab_height,
-            min_value=10.0,
-            step=10.0,
-            help="Auto-calculated from Crown Width × Slab Height. Override this if you drew a polygon, used GPS, or have a better area measurement."
-        )
-    
+        area_quick_input = st.number_input(f"Slab Area ({unit_area}) — optional", value=crown_width * slab_height, min_value=10.0)
+
     with col2:
         hardness_options = ["F-", "F", "F+", "4F-", "4F", "4F+", "1F-", "1F", "1F+", "P-", "P", "P+", "K-", "K", "K+"]
-        hardness = st.selectbox("Average Slab Hand Hardness", hardness_options, index=4)
-        
+        hardness = st.selectbox("Hand Hardness", hardness_options, index=4)
         grain_options = [
-            "Precipitation Particles (PP)",
-            "Graupel (PPgp)",
-            "Decomposing/Fragmented (DF)",
-            "Rounded Grains (RG)",
-            "Faceted Rounded (RGxf)",
-            "Faceted Crystals (FC)",
-            "Rounding Faceted (FCxr)",
-            "Depth Hoar (DH)",
-            "Melt-Freeze Crust (MFcr)"
+            "Precipitation Particles (PP)", "Graupel (PPgp)", "Decomposing/Fragmented (DF)",
+            "Rounded Grains (RG)", "Faceted Rounded (RGxf)", "Faceted Crystals (FC)",
+            "Rounding Faceted (FCxr)", "Depth Hoar (DH)", "Melt-Freeze Crust (MFcr)"
         ]
         grain = st.selectbox("Grain Type", grain_options, index=3)
-        
-        overall_unc = st.slider("Overall Measurement Uncertainty % (simple mode)", 5, 40, 15, help="Applied when Advanced section is closed")
     
-    # Advanced uncertainty controls
+    # Advanced uncertainty — always active
     with st.expander("🔧 Advanced Uncertainty (per input) — click to expand", expanded=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            unc_lw = st.slider("Crown Width / Slab Height / Area uncertainty %", 5, 40, 15, key="quick_lw")
-            unc_depth = st.slider("Depth / Slab thickness uncertainty %", 5, 40, 10, key="quick_depth")
+            unc_lw = st.slider("Crown Width / Slab Height / Area uncertainty %", 5, 40, 25, key="quick_lw")
+            unc_depth = st.slider("Depth / Slab thickness uncertainty %", 5, 40, 25, key="quick_depth")
         with col_b:
-            unc_density = st.slider("Density (hardness/grain) uncertainty %", 5, 50, 20, key="quick_density")
+            unc_density = st.slider("Density (hardness/grain) uncertainty %", 5, 50, 25, key="quick_density")
     
     if st.button("Calculate Quick Method", type="primary", use_container_width=True):
-        # Convert to metric
         crown_width_m = crown_width * conv_length
         slab_height_m = slab_height * conv_length
         depth_m = depth * conv_length
@@ -100,33 +84,36 @@ with tab_quick:
         density = calcs.get_density_from_hardness_grain(hardness, grain)
         mass_tonnes = volume_m3 * density / 1000.0
         
-        # Uncertainty
-        use_advanced = st.session_state.get("quick_lw", None) is not None
-        if use_advanced:
-            mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
-                mass_tonnes,
-                unc_length_width_pct=unc_lw,
-                unc_depth_pct=unc_depth,
-                unc_density_pct=unc_density
-            )
-        else:
-            mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
-                mass_tonnes,
-                unc_length_width_pct=overall_unc,
-                unc_depth_pct=overall_unc,
-                unc_density_pct=overall_unc
-            )
+        # === CRITICAL FIX: Read from session_state keys directly ===
+        unc_lw_val = st.session_state.get("quick_lw", 25)
+        unc_depth_val = st.session_state.get("quick_depth", 25)
+        unc_density_val = st.session_state.get("quick_density", 25)
+        
+        mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
+            mass_tonnes,
+            unc_length_width_pct=unc_lw_val,
+            unc_depth_pct=unc_depth_val,
+            unc_density_pct=unc_density_val
+        )
+        
+        total_rel_unc = (
+            (unc_lw_val / 100.0)**2 +
+            (unc_depth_val / 100.0)**2 +
+            (unc_density_val / 100.0)**2
+        ) ** 0.5
+        
+        f = 1 + total_rel_unc
+        low_mass = mass_tonnes / f
+        high_mass = mass_tonnes * f
         
         st.success(f"**Estimated D-Size: {mid_d}**  (uncertainty range: **{low_d} – {high_d}**)")
-        st.info(f"Mass: **{mass_tonnes:,.0f} tonnes** | Volume: {volume_m3:,.0f} m³ | Density: {density:.0f} kg/m³")
         
-        if use_imperial:
-            st.caption(f"Original inputs: Crown Width {crown_width:.0f} ft × Slab Height {slab_height:.0f} ft × Depth {depth:.1f} ft")
-        else:
-            st.caption(f"Original inputs: Crown Width {crown_width:.0f} m × Slab Height {slab_height:.0f} m × Depth {depth:.1f} m")
+        st.info(f"**Mass: {mass_tonnes:,.0f} tonnes** "
+                f"(uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**) | "
+                f"Volume: {volume_m3:,.0f} m³ | Density: {density:.0f} kg/m³")
+        
         st.caption(calcs.get_dsize_range_string(mass_tonnes))
         
-        # === FULL DATA FOR RESEARCH DATABASE ===
         st.session_state.quick_inputs = {
             "method": "Quick",
             "area_m2": area_m2,
@@ -135,6 +122,8 @@ with tab_quick:
             "calculated_d_size": mid_d,
             "unc_low": low_d,
             "unc_high": high_d,
+            "low_mass": low_mass,
+            "high_mass": high_mass,
             "crown_width_m": crown_width_m,
             "slab_height_m": slab_height_m,
             "depth_m": depth_m,
@@ -143,28 +132,20 @@ with tab_quick:
             "density_kgm3": density,
         }
         
+        fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
+        st.pyplot(fig)
+        
 # ====================== DETAILED SNOTEL METHOD ======================
 with tab_detailed:
     st.subheader("Detailed Method — SNOTEL Slab SWE")
     
-    # ==================== EXACT SAME STATION LOADING AS STORM TRACKER ====================
+    # ==================== STATION LOADING ====================
     try:
         stations_df = pd.read_csv("SNOTEL_station_list.csv")
-        
-        # Build the same display names and triplet that Storm Tracker uses
         stations_df['ID'] = stations_df['site_name'].str.extract(r'\((\d+)\)', expand=False).astype(str)
         stations_df['display_name'] = stations_df['site_name'] + " - " + stations_df['state']
-        
-        # Drop any rows that couldn't be parsed
         stations_df = stations_df[['display_name', 'ID', 'state']].dropna()
-        
         station_options = stations_df['display_name'].tolist()
-        
-        if "station_debug_shown" not in st.session_state:
-            #st.success(f"✅ Loaded **{len(station_options):,}** SNOTEL stations")
-            #st.info("Using same station list & triplet logic as Storm Tracker")
-            st.session_state.station_debug_shown = True
-            
     except Exception as e:
         st.error(f"Could not load SNOTEL_station_list.csv: {e}")
         station_options = ["Error loading stations"]
@@ -172,13 +153,7 @@ with tab_detailed:
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        selected_display = st.selectbox(
-            "Nearby SNOTEL Station",
-            options=station_options,
-            help="Type to search — matches Storm Tracker exactly"
-        )
-        
-        # Build triplet exactly like Storm Tracker
+        selected_display = st.selectbox("Nearby SNOTEL Station", station_options)
         if selected_display:
             selected_row = stations_df[stations_df['display_name'] == selected_display].iloc[0]
             station_id = selected_row['ID']
@@ -189,24 +164,15 @@ with tab_detailed:
             station_triplet = None
             station_name = None
         
-        weak_date = st.date_input(
-            "Weak Layer Date (when slab started accumulating)",
-            value=date(2025, 1, 15),
-            min_value=date(1960, 1, 1),
-            max_value=date.today()
-        )
-        release_date = st.date_input(
-            "Avalanche Release Date",
-            value=date(2025, 2, 10),
-            min_value=date(1960, 1, 1),
-            max_value=date.today()
-        )
+        weak_date = st.date_input("Weak Layer Date", value=date(2025, 1, 15), min_value=date(1960, 1, 1), max_value=date.today())
+        release_date = st.date_input("Avalanche Release Date", value=date(2025, 2, 10), min_value=date(1960, 1, 1), max_value=date.today())
     
     with col2:
         area_detailed_input = st.number_input(f"Slab Area ({unit_area})", value=80000.0 if use_imperial else 8000.0, min_value=100.0, step=100.0)
-        swe_adjust = st.slider("Local SWE Adjustment (±%) — your knowledge of site vs SNOTEL", -30, 30, 0)
+        swe_adjust = st.slider("Local SWE Adjustment (±%)", -30, 30, 0)
         burial_depth_ref = st.number_input(f"Slab thickness ({unit_length}) — reference only", value=2.5 if use_imperial else 0.8, min_value=0.1, step=0.1)
     
+    # Advanced uncertainty — only relevant sliders for Detailed mode
     with st.expander("🔧 Advanced Uncertainty (per input)", expanded=False):
         col_a, col_b = st.columns(2)
         with col_a:
@@ -229,30 +195,49 @@ with tab_detailed:
                     adjusted_swe_m = adjusted_swe_mm / 1000.0
                     
                     area_m2 = area_detailed_input * conv_area
-                    volume_m3 = area_m2 * burial_depth_ref * conv_length   # optional reference volume
                     mass_tonnes = area_m2 * adjusted_swe_m
                     
+                    # === DETAILED MODE: ONLY AREA + SWE UNCERTAINTY ===
                     mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
                         mass_tonnes,
                         unc_length_width_pct=unc_area,
-                        unc_depth_pct=5,
-                        unc_density_pct=5,
+                        unc_depth_pct=0,      # irrelevant
+                        unc_density_pct=0,    # irrelevant
                         unc_swe_pct=unc_swe
                     )
                     
-                    st.success(f"**Estimated D-Size: {mid_d}**  (uncertainty range: **{low_d} – {high_d}**)")
-                    st.info(f"**Slab SWE: {adjusted_swe_mm:.1f} mm** | Mass: **{mass_tonnes:,.0f} tonnes**")
-                    st.caption(f"Weak: {slab_data['swe_weak_mm']:.1f} mm | Release: {slab_data['swe_release_mm']:.1f} mm")
+                    # Root Sum-Square for total relative uncertainty
+                    total_rel_unc = (
+                        (unc_lw_val / 100.0)**2 +
+                        (unc_depth_val / 100.0)**2 +
+                        (unc_density_val / 100.0)**2
+                    ) ** 0.5
                     
-                    # === FULL DATA FOR RESEARCH DATABASE ===
+                    f = 1 + total_rel_unc
+                    low_mass = mass_tonnes / f
+                    high_mass = mass_tonnes * f
+                    
+                    st.success(f"**Estimated D-Size: {mid_d}**  (uncertainty range: **{low_d} – {high_d}**)")
+                    
+                    st.info(f"**Mass: {mass_tonnes:,.0f} tonnes** "
+                            f"(uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**) | "
+                            f"Slab SWE: {adjusted_swe_mm:.1f} mm")
+                    
+                    # Dynamic chart with accurate uncertainty band
+                    fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
+                    st.pyplot(fig)
+                    
+                    # Store for research database
                     st.session_state.detailed_inputs = {
                         "method": "Detailed",
                         "area_m2": area_m2,
-                        "volume_m3": volume_m3,                    # reference only
+                        "volume_m3": area_m2 * (burial_depth_ref * conv_length),
                         "mass_tonnes": mass_tonnes,
                         "calculated_d_size": mid_d,
                         "unc_low": low_d,
                         "unc_high": high_d,
+                        "low_mass": low_mass,
+                        "high_mass": high_mass,
                         "weak_layer_date": str(weak_date),
                         "release_date": str(release_date),
                         "snotel_station": station_name,

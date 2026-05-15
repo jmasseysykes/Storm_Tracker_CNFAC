@@ -29,27 +29,30 @@ def get_dsize_range_string(mass_tonnes: float) -> str:
 
 def get_uncertainty_mass_range(
     mass_tonnes: float,
-    unc_length_width_pct: float = 15,   # combined for L×W or area
+    unc_length_width_pct: float = 15,
     unc_depth_pct: float = 15,
     unc_density_pct: float = 20,
-    unc_swe_pct: float = 10             # only used in detailed method
+    unc_swe_pct: float = 10
 ) -> tuple[str, str, str]:
-    """Returns (mid_dsize_label, low_label, high_label)"""
-    # Convert % to multiplicative factors
-    f_lw = 1 + unc_length_width_pct / 100.0
-    f_d  = 1 + unc_depth_pct / 100.0
-    f_den = 1 + unc_density_pct / 100.0
-    f_swe = 1 + unc_swe_pct / 100.0
-
-    # Quick method: mass = L × W × D × density
-    # Detailed method: mass = Area × SWE  (area already includes L×W)
-    mass_low  = mass_tonnes / (f_lw * f_d * f_den * f_swe)
-    mass_high = mass_tonnes * (f_lw * f_d * f_den * f_swe)
-
+    """Returns (mid_dsize_label, low_label, high_label) using Root-Sum-Square"""
+    
+    # Root-Sum-Square for independent uncertainties (much more realistic)
+    total_rel_unc = (
+        (unc_length_width_pct / 100.0)**2 +
+        (unc_depth_pct / 100.0)**2 +
+        (unc_density_pct / 100.0)**2 +
+        (unc_swe_pct / 100.0)**2
+    ) ** 0.5
+    
+    factor = 1 + total_rel_unc
+    
+    mass_low = mass_tonnes / factor
+    mass_high = mass_tonnes * factor
+    
     mid_label = mass_to_dsize(mass_tonnes)["label"]
     low_label = mass_to_dsize(mass_low)["label"]
     high_label = mass_to_dsize(mass_high)["label"]
-
+    
     return mid_label, low_label, high_label
 
 # ==================== REFINED DENSITY LOOKUP (Kim & Jamieson 2014 Table 3) ====================
