@@ -186,13 +186,13 @@ with tab_detailed:
         swe_adjust = st.slider("Local SWE Adjustment (±%)", -30, 30, 0)
         burial_depth_ref = st.number_input(f"Slab thickness ({unit_length}) — reference only", value=2.5 if use_imperial else 0.8, min_value=0.1, step=0.1)
     
-    # Advanced uncertainty — only relevant sliders for Detailed mode
+    # Advanced uncertainty — only Area and SWE for Detailed method
     with st.expander("🔧 Advanced Uncertainty (per input)", expanded=False):
         col_a, col_b = st.columns(2)
         with col_a:
-            unc_area = st.slider("Area uncertainty %", 5, 50, 15, key="detailed_area")
+            unc_area = st.slider("Area uncertainty %", 5, 40, 15, key="detailed_area")
         with col_b:
-            unc_swe = st.slider("SWE difference uncertainty %", 5, 50, 10, key="detailed_swe")
+            unc_swe = st.slider("SWE difference uncertainty %", 5, 40, 10, key="detailed_swe")
     
     if st.button("Calculate Detailed SNOTEL Method", type="primary", use_container_width=True):
         if not station_triplet:
@@ -211,25 +211,20 @@ with tab_detailed:
                     area_m2 = area_detailed_input * conv_area
                     mass_tonnes = area_m2 * adjusted_swe_m
                     
-                    # === DETAILED MODE: ONLY AREA + SWE UNCERTAINTY ===
+                    # === ONLY AREA + SWE UNCERTAINTY ===
                     mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
                         mass_tonnes,
                         unc_length_width_pct=unc_area,
-                        unc_depth_pct=0,      # irrelevant
-                        unc_density_pct=0,    # irrelevant
+                        unc_depth_pct=0,
+                        unc_density_pct=0,
                         unc_swe_pct=unc_swe
                     )
                     
-                    # Root Sum-Square for total relative uncertainty
-                    total_rel_unc = (
-                        (unc_lw_val / 100.0)**2 +
-                        (unc_depth_val / 100.0)**2 +
-                        (unc_density_val / 100.0)**2
-                    ) ** 0.5
-                    
-                    f = 1 + total_rel_unc
-                    low_mass = mass_tonnes / f
-                    high_mass = mass_tonnes * f
+                    # Correct numeric mass range
+                    f_area = 1 + unc_area / 100.0
+                    f_swe  = 1 + unc_swe / 100.0
+                    low_mass  = mass_tonnes / (f_area * f_swe)
+                    high_mass = mass_tonnes * (f_area * f_swe)
                     
                     st.success(f"**Estimated D-Size: {mid_d}**  (uncertainty range: **{low_d} – {high_d}**)")
                     
@@ -237,9 +232,9 @@ with tab_detailed:
                             f"(uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**) | "
                             f"Slab SWE: {adjusted_swe_mm:.1f} mm")
                     
-                    # Dynamic chart with accurate uncertainty band
+                    # Dynamic chart
                     fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
-                    st.pyplot(fig, use_container_width=False)
+                    st.pyplot(fig)
                     
                     # Store for research database
                     st.session_state.detailed_inputs = {
