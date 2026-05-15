@@ -1,13 +1,23 @@
 import os
 import psycopg2
 import pandas as pd
-from datetime import datetime
 
-# Supabase connection (will come from Render environment variables)
-DB_URL = os.getenv("DATABASE_URL")
+# Supabase connection using individual environment variables
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "postgres")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 def get_connection():
-    return psycopg2.connect(DB_URL)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        sslmode="require"
+    )
 
 def init_db():
     conn = get_connection()
