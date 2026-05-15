@@ -28,6 +28,15 @@ st.markdown("""
 st.title("Avalanche Destructive Size Estimator")
 st.caption("CNFAC Avalanche Tools — ISSW Project with Erich Peitzsch, Zach Guy, Ron Simenhois, and Bruce Jamieson")
 
+# === D-SIZE CLASSIFICATION CHART (collapsible) ===
+with st.expander("📊 View D-Size Classification Chart — Mass Ranges and Typical Values", expanded=False):
+    st.image(
+        "dsize_yellow_orange_red_final.png",
+        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
+        use_container_width=False,
+        width=900                    # comfortable size on desktop
+    )
+    
 # ====================== UNIT SYSTEM TOGGLE ======================
 use_imperial = st.toggle(
     "🌎 Use Imperial units (ft / ft²)",
@@ -39,15 +48,6 @@ unit_length = "ft" if use_imperial else "m"
 unit_area = "ft²" if use_imperial else "m²"
 conv_length = 0.3048 if use_imperial else 1.0          # ft → m
 conv_area = conv_length ** 2                            # ft² → m²
-
-# === D-SIZE CLASSIFICATION CHART (collapsible) ===
-with st.expander("📊 View D-Size Classification Chart — Mass Ranges and Typical Values", expanded=False):
-    st.image(
-        "dsize_yellow_orange_red_final.png",
-        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
-        use_container_width=False,
-        width=900                    # comfortable size on desktop
-    )
 
 # ====================== TABS ======================
 tab_quick, tab_detailed, tab_log = st.tabs([
