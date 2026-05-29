@@ -155,8 +155,12 @@ with tab_quick:
                 entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1)
                 entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0)
             else:
-                entr_swe = st.number_input(f"Entrainment SWE ({'inches' if use_imperial else 'mm'})", 
-                                           value=300 if use_imperial else 400, min_value=0.0, step=10.0)
+                entr_swe = st.number_input(
+                    f"Entrainment SWE ({swe_unit})", 
+                    value=300.0 if use_imperial else 400.0,   # ← Made float
+                    min_value=0.0, 
+                    step=10.0
+                )
     if st.button("Calculate Quick Method", type="primary", use_container_width=True):
         crown_width_m = crown_width * conv_length
         slab_length_m = slab_length * conv_length
