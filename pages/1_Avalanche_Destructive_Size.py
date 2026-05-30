@@ -44,6 +44,7 @@ use_imperial = st.toggle(
     help="Toggle ON to enter all length, width, depth, and area in feet. Calculations are always done in metric."
 )
 
+swe_unit = "inches" if use_imperial else "mm"
 unit_length = "ft" if use_imperial else "m"
 unit_area = "ft²" if use_imperial else "m²"
 conv_length = 0.3048 if use_imperial else 1.0          # ft → m
