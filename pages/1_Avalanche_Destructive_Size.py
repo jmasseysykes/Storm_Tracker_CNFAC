@@ -138,30 +138,37 @@ with tab_quick:
             layers.append({"thickness_cm": 20, "hardness": "4F", "grain": "Rounded Grains (RG)"})
             st.rerun()
     
-    # === UNIFIED ENTRAINMENT ===
+        # === UNIFIED ENTRAINMENT ===
     if include_entrainment:
         st.markdown("**Entrainment Estimation**")
         entr_method = st.radio("Entrainment Calculation Method", 
-                               ["Dimensions + Hardness/Grain", "SWE-based"], horizontal=True)
+                               ["Dimensions + Hardness/Grain", "SWE-based"], 
+                               horizontal=True, key="quick_entr_method")
         
         col_e1, col_e2 = st.columns([1, 1])
         with col_e1:
-            entr_width = st.number_input(f"Entrainment Width ({unit_length})", value=crown_width * 1.5, min_value=1.0, step=1.0)
-            entr_length = st.number_input(f"Entrainment Length ({unit_length})", value=slab_length * 2, min_value=1.0, step=1.0)
-            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", value=entr_width * entr_length, min_value=10.0)
+            entr_width = st.number_input(f"Entrainment Width ({unit_length})", 
+                                         value=crown_width * 1.5, min_value=1.0, step=1.0, 
+                                         key="q_entr_width")
+            entr_length = st.number_input(f"Entrainment Length ({unit_length})", 
+                                          value=slab_length * 2, min_value=1.0, step=1.0, 
+                                          key="q_entr_length")
+            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", 
+                                        value=entr_width * entr_length, min_value=10.0, 
+                                        key="q_entr_area")
+            entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", 
+                                         value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05, 
+                                         key="q_entr_depth")
         
         with col_e2:
             if entr_method == "Dimensions + Hardness/Grain":
-                entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05)
-                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1)
-                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0)
+                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1, key="q_entr_hardness")
+                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="q_entr_grain")
             else:
-                entr_swe = st.number_input(
-                    f"Entrainment SWE ({swe_unit})", 
-                    value=1.5 if use_imperial else 40.0,
-                    min_value=0.0, 
-                    step=10.0
-                )
+                entr_swe = st.number_input(f"Entrainment SWE ({swe_unit})", 
+                                           value=300.0 if use_imperial else 400.0, 
+                                           min_value=0.0, step=10.0, 
+                                           key="q_entr_swe")
     if st.button("Calculate Quick Method", type="primary", use_container_width=True):
         crown_width_m = crown_width * conv_length
         slab_length_m = slab_length * conv_length
@@ -322,7 +329,7 @@ with tab_detailed:
             if include_entrainment:
                 unc_entrainment = st.slider("Entrainment uncertainty %", 0, 50, 25, key="detailed_entr")
     
-    # === UNIFIED ENTRAINMENT ===
+        # === UNIFIED ENTRAINMENT ===
     if include_entrainment:
         st.markdown("**Entrainment Estimation**")
         entr_method = st.radio("Entrainment Calculation Method", 
@@ -331,22 +338,32 @@ with tab_detailed:
         
         col_e1, col_e2 = st.columns([1, 1])
         with col_e1:
-            entr_width = st.number_input(f"Entrainment Width ({unit_length})", value=200.0 if use_imperial else 60.0, min_value=1.0, step=1.0)
-            entr_length = st.number_input(f"Entrainment Length ({unit_length})", value=800.0 if use_imperial else 250.0, min_value=1.0, step=1.0)
-            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", value=entr_width * entr_length, min_value=10.0)
-            entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05)
+            entr_width = st.number_input(f"Entrainment Width ({unit_length})", 
+                                         value=200.0 if use_imperial else 60.0, min_value=1.0, step=1.0, 
+                                         key="d_entr_width")
+            entr_length = st.number_input(f"Entrainment Length ({unit_length})", 
+                                          value=800.0 if use_imperial else 250.0, min_value=1.0, step=1.0, 
+                                          key="d_entr_length")
+            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", 
+                                        value=entr_width * entr_length, min_value=10.0, 
+                                        key="d_entr_area")
+            entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", 
+                                         value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05, 
+                                         key="d_entr_depth")
         
         with col_e2:
             if entr_method == "Dimensions + Hardness/Grain":
-                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1)
-                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0)
+                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1, key="d_entr_hardness")
+                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="d_entr_grain")
             else:
-                entr_weak_date = st.date_input("Entrainment Start Date", value=weak_date, min_value=date(1960, 1, 1))
-                entr_release_date = st.date_input("Entrainment End Date", value=release_date, min_value=date(1960, 1, 1))
+                entr_weak_date = st.date_input("Entrainment Weak Layer Date", value=weak_date, min_value=date(1960, 1, 1), key="d_entr_weak_date")
+                entr_release_date = st.date_input("Entrainment Release Date", value=release_date, min_value=date(1960, 1, 1), key="d_entr_release_date")
                 entr_manual_swe = st.number_input(
                     f"Manual Entrainment SWE ({swe_unit}) — Optional",
-                    value=None, min_value=0.0, step=0.1
+                    value=None, min_value=0.0, step=0.1, 
+                    key="d_entr_manual_swe"
                 )
+                
                 
     
     if st.button("Calculate Detailed SNOTEL Method", type="primary", use_container_width=True):
