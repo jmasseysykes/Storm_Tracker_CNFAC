@@ -166,7 +166,7 @@ with tab_quick:
                 entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="q_entr_grain")
             else:
                 entr_swe = st.number_input(f"Entrainment SWE ({swe_unit})", 
-                                           value=300.0 if use_imperial else 400.0, 
+                                           value=1.5 if use_imperial else 40.0, 
                                            min_value=0.0, step=10.0, 
                                            key="q_entr_swe")
     if st.button("Calculate Quick Method", type="primary", use_container_width=True):
