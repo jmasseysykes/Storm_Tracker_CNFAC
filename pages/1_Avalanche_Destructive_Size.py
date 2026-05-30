@@ -158,7 +158,7 @@ with tab_quick:
             else:
                 entr_swe = st.number_input(
                     f"Entrainment SWE ({swe_unit})", 
-                    value=300.0 if use_imperial else 400.0,   # ← Made float
+                    value=1.5 if use_imperial else 40.0,
                     min_value=0.0, 
                     step=10.0
                 )
@@ -183,22 +183,34 @@ with tab_quick:
         
         slab_mass = volume_m3 * density / 1000.0
         
-        # Entrainment
+        # ==================== ENTRAINMENT ====================
         entrainment_mass = 0.0
         if include_entrainment:
             entr_area_m2 = entr_area * conv_area
             entr_depth_m = entr_depth * conv_length
-            entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
-            entrainment_volume = entr_area_m2 * entr_depth_m
-            entrainment_mass = entrainment_volume * entr_density / 1000.0
+            
+            if entr_method == "SWE-based":
+                # Use manual SWE if entered
+                if 'entr_swe' in locals() and entr_swe is not None and entr_swe > 0:
+                    entr_swe_mm = entr_swe * 25.4 if use_imperial else entr_swe
+                else:
+                    # Fallback to hardness/grain method
+                    entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
+                    entr_swe_mm = entr_density * entr_depth * conv_length * 1000
+            else:
+                # Dimensions + Hardness/Grain
+                entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
+                entr_swe_mm = entr_density * entr_depth * conv_length * 1000
+            
+            entrainment_mass = entr_area_m2 * (entr_swe_mm / 1000.0)
         
         total_mass = slab_mass + entrainment_mass
         
-        # === RSS UNCERTAINTY ===
+        # Uncertainty (RSS)
         unc_lw_val = st.session_state.get("quick_lw", 15)
         unc_depth_val = st.session_state.get("quick_depth", 15)
         unc_density_val = st.session_state.get("quick_density", 20)
-        unc_entr_val = st.session_state.get("quick_entr", 25) if include_entrainment else 0
+        unc_entr_val = st.session_state.get("quick_entr_unc", 25) if include_entrainment else 0
         
         total_rel_unc = (
             (unc_lw_val / 100.0)**2 +
@@ -207,7 +219,6 @@ with tab_quick:
         )
         if include_entrainment:
             total_rel_unc += (unc_entr_val / 100.0)**2
-        
         total_rel_unc = total_rel_unc ** 0.5
         
         f = 1 + total_rel_unc
@@ -223,13 +234,12 @@ with tab_quick:
         
         st.success(f"**Estimated D-Size: {mid_d}** (uncertainty range: **{low_d} – {high_d}**)")
         
-        st.info(f"**Slab Mass**: {slab_mass:,.0f} t  |  **Entrained Mass**: {entrainment_mass:,.0f} t  |  "
+        st.info(f"**Slab Mass**: {slab_mass:,.0f} t | **Entrained Mass**: {entrainment_mass:,.0f} t | "
                 f"**Total Mass**: {total_mass:,.0f} tonnes")
         
-        st.caption(f"Uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**")
         st.caption(calcs.get_dsize_range_string(total_mass))
         
-        # Store for database
+        # Store
         st.session_state.quick_inputs = {
             "method": "Quick",
             "area_m2": slab_area_m2,
