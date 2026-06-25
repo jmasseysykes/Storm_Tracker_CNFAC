@@ -29,192 +29,206 @@ def get_connection():
         return sqlite3.connect(DB_PATH, check_same_thread=False)  # allow multi-thread for Streamlit
 
 def init_db():
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    if USE_SUPABASE:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS avalanches (
-                id SERIAL PRIMARY KEY,
-                timestamp TIMESTAMPTZ DEFAULT NOW(),
-                observer TEXT,
-                location TEXT,
-                method TEXT,
-                area_m2 REAL,
-                volume_m3 REAL,
-                mass_tonnes REAL,
-                entrainment_mass REAL,
-                total_mass REAL,
-                calculated_d_size TEXT,
-                original_calculated_d_size TEXT,
-                dsize_method TEXT,
-                dsize_mass_original TEXT,
-                dsize_mass_midpoint TEXT,
-                dsize_volume_midpoint TEXT,
-                unc_low TEXT,
-                unc_high TEXT,
-                field_assessed_d_size TEXT,
-                crown_width_m REAL,
-                slab_length_m REAL,
-                depth_m REAL,
-                hardness TEXT,
-                grain TEXT,
-                density_kgm3 REAL,
-                use_layered_density BOOLEAN,
-                include_entrainment BOOLEAN,
-                entr_width_m REAL,
-                entr_length_m REAL,
-                entr_area_m2 REAL,
-                entr_depth_m REAL,
-                entr_hardness TEXT,
-                entr_grain TEXT,
-                entr_swe_mm REAL,
-                debris_type TEXT,
-                weak_layer_date TEXT,
-                release_date TEXT,
-                snotel_station TEXT,
-                slab_swe_mm REAL,
-                adjusted_swe_mm REAL,
-                burial_depth_ref_m REAL,
-                unc_lw_pct REAL,
-                unc_depth_pct REAL,
-                unc_density_pct REAL,
-                unc_area_pct REAL,
-                unc_swe_pct REAL,
-                unc_entrainment_pct REAL,
-                notes TEXT,
-                report_link TEXT,
-                crown_depth_direct_m REAL,
-                crown_depth_derived_m REAL,
-                geometry_mode TEXT,
-                density_mode TEXT,
-                density_profile TEXT,
-                swe_source TEXT,
-                entrainment_method_choice TEXT,
-                area_overridden INTEGER,
-                schema_version TEXT,
-                entrainment_method TEXT
-            )
-        """)
-    else:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS avalanches (
-                id INTEGER PRIMARY KEY,
-                timestamp TEXT,
-                observer TEXT,
-                location TEXT,
-                method TEXT,
-                area_m2 REAL,
-                volume_m3 REAL,
-                mass_tonnes REAL,
-                entrainment_mass REAL,
-                total_mass REAL,
-                calculated_d_size TEXT,
-                original_calculated_d_size TEXT,
-                dsize_method TEXT,
-                dsize_mass_original TEXT,
-                dsize_mass_midpoint TEXT,
-                dsize_volume_midpoint TEXT,
-                unc_low TEXT,
-                unc_high TEXT,
-                field_assessed_d_size TEXT,
-                crown_width_m REAL,
-                slab_length_m REAL,
-                depth_m REAL,
-                hardness TEXT,
-                grain TEXT,
-                density_kgm3 REAL,
-                use_layered_density INTEGER,
-                include_entrainment INTEGER,
-                entr_width_m REAL,
-                entr_length_m REAL,
-                entr_area_m2 REAL,
-                entr_depth_m REAL,
-                entr_hardness TEXT,
-                entr_grain TEXT,
-                entr_swe_mm REAL,
-                debris_type TEXT,
-                weak_layer_date TEXT,
-                release_date TEXT,
-                snotel_station TEXT,
-                slab_swe_mm REAL,
-                adjusted_swe_mm REAL,
-                burial_depth_ref_m REAL,
-                unc_lw_pct REAL,
-                unc_depth_pct REAL,
-                unc_density_pct REAL,
-                unc_area_pct REAL,
-                unc_swe_pct REAL,
-                unc_entrainment_pct REAL,
-                notes TEXT,
-                report_link TEXT,
-                crown_depth_direct_m REAL,
-                crown_depth_derived_m REAL,
-                geometry_mode TEXT,
-                density_mode TEXT,
-                density_profile TEXT,
-                swe_source TEXT,
-                entrainment_method_choice TEXT,
-                area_overridden INTEGER,
-                schema_version TEXT,
-                entrainment_method TEXT
-            )
-        """)
-    
-    # Safe migration for all new columns
-    new_columns = [
-        ("slab_length_m", "REAL"),
-        ("entrainment_mass", "REAL"),
-        ("total_mass", "REAL"),
-        ("use_layered_density", "BOOLEAN" if USE_SUPABASE else "INTEGER"),
-        ("include_entrainment", "BOOLEAN" if USE_SUPABASE else "INTEGER"),
-        ("entr_width_m", "REAL"),
-        ("entr_length_m", "REAL"),
-        ("entr_area_m2", "REAL"),
-        ("entr_depth_m", "REAL"),
-        ("entr_hardness", "TEXT"),
-        ("entr_grain", "TEXT"),
-        ("entr_swe_mm", "REAL"),
-        ("debris_type", "TEXT"),
-        ("unc_lw_pct", "REAL"),
-        ("unc_depth_pct", "REAL"),
-        ("unc_density_pct", "REAL"),
-        ("unc_area_pct", "REAL"),
-        ("unc_swe_pct", "REAL"),
-        ("unc_entrainment_pct", "REAL"),
-        ("unc_runout_pct", "REAL"),
-        ("original_calculated_d_size", "TEXT"),
-        ("dsize_method", "TEXT"),
-        ("report_link", "TEXT"),
-        ("dsize_mass_original", "TEXT"),
-        ("dsize_mass_midpoint", "TEXT"),
-        ("dsize_volume_midpoint", "TEXT"),
-        ("crown_depth_direct_m", "REAL"),
-        ("crown_depth_derived_m", "REAL"),
-        ("geometry_mode", "TEXT"),
-        ("density_mode", "TEXT"),
-        ("density_profile", "TEXT"),
-        ("swe_source", "TEXT"),
-        ("entrainment_method_choice", "TEXT"),
-        ("area_overridden", "INTEGER"),
-        ("schema_version", "TEXT"),
-        ("entrainment_method", "TEXT"),
-    ]
-    
-    for col_name, col_type in new_columns:
-        try:
-            if USE_SUPABASE:
-                cur.execute(f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
-            else:
-                cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col_name} {col_type}")
-        except:
-            pass  # Column already exists
-    
-    conn.commit()
-    cur.close()
-    conn.close()
+    conn = None
+    cur = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        if USE_SUPABASE:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS avalanches (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMPTZ DEFAULT NOW(),
+                    observer TEXT,
+                    location TEXT,
+                    method TEXT,
+                    area_m2 REAL,
+                    volume_m3 REAL,
+                    mass_tonnes REAL,
+                    entrainment_mass REAL,
+                    total_mass REAL,
+                    calculated_d_size TEXT,
+                    original_calculated_d_size TEXT,
+                    dsize_method TEXT,
+                    dsize_mass_original TEXT,
+                    dsize_mass_midpoint TEXT,
+                    dsize_volume_midpoint TEXT,
+                    unc_low TEXT,
+                    unc_high TEXT,
+                    field_assessed_d_size TEXT,
+                    crown_width_m REAL,
+                    slab_length_m REAL,
+                    depth_m REAL,
+                    hardness TEXT,
+                    grain TEXT,
+                    density_kgm3 REAL,
+                    use_layered_density BOOLEAN,
+                    include_entrainment BOOLEAN,
+                    entr_width_m REAL,
+                    entr_length_m REAL,
+                    entr_area_m2 REAL,
+                    entr_depth_m REAL,
+                    entr_hardness TEXT,
+                    entr_grain TEXT,
+                    entr_swe_mm REAL,
+                    debris_type TEXT,
+                    weak_layer_date TEXT,
+                    release_date TEXT,
+                    snotel_station TEXT,
+                    slab_swe_mm REAL,
+                    adjusted_swe_mm REAL,
+                    burial_depth_ref_m REAL,
+                    unc_lw_pct REAL,
+                    unc_depth_pct REAL,
+                    unc_density_pct REAL,
+                    unc_area_pct REAL,
+                    unc_swe_pct REAL,
+                    unc_entrainment_pct REAL,
+                    notes TEXT,
+                    report_link TEXT,
+                    crown_depth_direct_m REAL,
+                    crown_depth_derived_m REAL,
+                    geometry_mode TEXT,
+                    density_mode TEXT,
+                    density_profile TEXT,
+                    swe_source TEXT,
+                    entrainment_method_choice TEXT,
+                    area_overridden INTEGER,
+                    schema_version TEXT,
+                    entrainment_method TEXT
+                )
+            """)
+        else:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS avalanches (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT,
+                    observer TEXT,
+                    location TEXT,
+                    method TEXT,
+                    area_m2 REAL,
+                    volume_m3 REAL,
+                    mass_tonnes REAL,
+                    entrainment_mass REAL,
+                    total_mass REAL,
+                    calculated_d_size TEXT,
+                    original_calculated_d_size TEXT,
+                    dsize_method TEXT,
+                    dsize_mass_original TEXT,
+                    dsize_mass_midpoint TEXT,
+                    dsize_volume_midpoint TEXT,
+                    unc_low TEXT,
+                    unc_high TEXT,
+                    field_assessed_d_size TEXT,
+                    crown_width_m REAL,
+                    slab_length_m REAL,
+                    depth_m REAL,
+                    hardness TEXT,
+                    grain TEXT,
+                    density_kgm3 REAL,
+                    use_layered_density INTEGER,
+                    include_entrainment INTEGER,
+                    entr_width_m REAL,
+                    entr_length_m REAL,
+                    entr_area_m2 REAL,
+                    entr_depth_m REAL,
+                    entr_hardness TEXT,
+                    entr_grain TEXT,
+                    entr_swe_mm REAL,
+                    debris_type TEXT,
+                    weak_layer_date TEXT,
+                    release_date TEXT,
+                    snotel_station TEXT,
+                    slab_swe_mm REAL,
+                    adjusted_swe_mm REAL,
+                    burial_depth_ref_m REAL,
+                    unc_lw_pct REAL,
+                    unc_depth_pct REAL,
+                    unc_density_pct REAL,
+                    unc_area_pct REAL,
+                    unc_swe_pct REAL,
+                    unc_entrainment_pct REAL,
+                    notes TEXT,
+                    report_link TEXT,
+                    crown_depth_direct_m REAL,
+                    crown_depth_derived_m REAL,
+                    geometry_mode TEXT,
+                    density_mode TEXT,
+                    density_profile TEXT,
+                    swe_source TEXT,
+                    entrainment_method_choice TEXT,
+                    area_overridden INTEGER,
+                    schema_version TEXT,
+                    entrainment_method TEXT
+                )
+            """)
+        
+        # Safe migration for all new columns
+        new_columns = [
+            ("slab_length_m", "REAL"),
+            ("entrainment_mass", "REAL"),
+            ("total_mass", "REAL"),
+            ("use_layered_density", "BOOLEAN" if USE_SUPABASE else "INTEGER"),
+            ("include_entrainment", "BOOLEAN" if USE_SUPABASE else "INTEGER"),
+            ("entr_width_m", "REAL"),
+            ("entr_length_m", "REAL"),
+            ("entr_area_m2", "REAL"),
+            ("entr_depth_m", "REAL"),
+            ("entr_hardness", "TEXT"),
+            ("entr_grain", "TEXT"),
+            ("entr_swe_mm", "REAL"),
+            ("debris_type", "TEXT"),
+            ("unc_lw_pct", "REAL"),
+            ("unc_depth_pct", "REAL"),
+            ("unc_density_pct", "REAL"),
+            ("unc_area_pct", "REAL"),
+            ("unc_swe_pct", "REAL"),
+            ("unc_entrainment_pct", "REAL"),
+            ("unc_runout_pct", "REAL"),
+            ("original_calculated_d_size", "TEXT"),
+            ("dsize_method", "TEXT"),
+            ("report_link", "TEXT"),
+            ("dsize_mass_original", "TEXT"),
+            ("dsize_mass_midpoint", "TEXT"),
+            ("dsize_volume_midpoint", "TEXT"),
+            ("crown_depth_direct_m", "REAL"),
+            ("crown_depth_derived_m", "REAL"),
+            ("geometry_mode", "TEXT"),
+            ("density_mode", "TEXT"),
+            ("density_profile", "TEXT"),
+            ("swe_source", "TEXT"),
+            ("entrainment_method_choice", "TEXT"),
+            ("area_overridden", "INTEGER"),
+            ("schema_version", "TEXT"),
+            ("entrainment_method", "TEXT"),
+        ]
+        
+        for col_name, col_type in new_columns:
+            try:
+                if USE_SUPABASE:
+                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+                else:
+                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col_name} {col_type}")
+            except:
+                pass  # Column already exists
+        
+        conn.commit()
+    except Exception as e:
+        print(f"[init_db] Error: {e}")
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except:
+                pass
 
-    # Run D-size binning migration only once per process (idempotent but can be heavy on large tables)
+    # Run D-size binning migration only once per process
     if not hasattr(get_connection, "_migration_done"):
         migrate_dsize_calculations()
         get_connection._migration_done = True
@@ -257,8 +271,10 @@ def migrate_dsize_calculations():
     import re
     url_pattern = re.compile(r'https?://[^\s<>"\)\]]+')
 
-    conn = get_connection()
+    conn = None
+    cur = None
     try:
+        conn = get_connection()
         cur = conn.cursor()
 
         # Ensure the columns exist
@@ -369,5 +385,13 @@ def migrate_dsize_calculations():
     except Exception as e:
         print(f"[D-Size Migration] Error: {e}")
     finally:
-        cur.close()
-        conn.close()
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
