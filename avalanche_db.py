@@ -36,6 +36,9 @@ AVALANCHE_COLUMNS = frozenset([
     "entrainment_method",
 ])
 
+# Stored as INTEGER (0/1) in Postgres and SQLite — UI often produces booleans.
+INTEGER_FLAG_COLUMNS = frozenset(["area_overridden"])
+
 
 def _ensure_connection_ready(conn):
     """Clear any aborted PostgreSQL transaction before running new SQL."""
@@ -45,7 +48,7 @@ def _ensure_connection_ready(conn):
         pass
 
 
-def _sanitize_value(value):
+def _sanitize_value(value, column=None):
     """Convert numpy/pandas scalars to native Python types for psycopg2/sqlite3."""
     if value is None:
         return None
@@ -53,9 +56,15 @@ def _sanitize_value(value):
         return value.isoformat()
     if hasattr(value, "item") and not isinstance(value, (str, bytes)):
         try:
-            return value.item()
+            value = value.item()
         except (ValueError, AttributeError):
             pass
+    if column in INTEGER_FLAG_COLUMNS:
+        if isinstance(value, bool):
+            return int(value)
+        if value in (0, 1):
+            return int(value)
+        return None
     if isinstance(value, bool):
         return bool(value)
     return value
@@ -312,7 +321,7 @@ def save_avalanche(data: dict):
     cur = conn.cursor()
 
     filtered = {
-        k: _sanitize_value(v)
+        k: _sanitize_value(v, column=k)
         for k, v in data.items()
         if k in AVALANCHE_COLUMNS
     }
