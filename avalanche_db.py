@@ -17,6 +17,70 @@ if USE_SUPABASE:
 else:
     DB_PATH = "avalanche_log.db"
 
+# Columns accepted by INSERT (id is auto-generated).
+AVALANCHE_COLUMNS = frozenset([
+    "timestamp", "observer", "location", "method", "area_m2", "volume_m3",
+    "mass_tonnes", "entrainment_mass", "total_mass", "calculated_d_size",
+    "original_calculated_d_size", "dsize_method", "dsize_mass_original",
+    "dsize_mass_midpoint", "dsize_volume_midpoint", "unc_low", "unc_high",
+    "field_assessed_d_size", "crown_width_m", "slab_length_m", "depth_m",
+    "hardness", "grain", "density_kgm3", "use_layered_density",
+    "include_entrainment", "entr_width_m", "entr_length_m", "entr_area_m2",
+    "entr_depth_m", "entr_hardness", "entr_grain", "entr_swe_mm", "debris_type",
+    "weak_layer_date", "release_date", "snotel_station", "slab_swe_mm",
+    "adjusted_swe_mm", "burial_depth_ref_m", "unc_lw_pct", "unc_depth_pct",
+    "unc_density_pct", "unc_area_pct", "unc_swe_pct", "unc_entrainment_pct",
+    "unc_runout_pct", "notes", "report_link", "crown_depth_direct_m",
+    "crown_depth_derived_m", "geometry_mode", "density_mode", "density_profile",
+    "swe_source", "entrainment_method_choice", "area_overridden", "schema_version",
+    "entrainment_method",
+])
+
+
+def _ensure_connection_ready(conn):
+    """Clear any aborted PostgreSQL transaction before running new SQL."""
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+
+def _sanitize_value(value):
+    """Convert numpy/pandas scalars to native Python types for psycopg2/sqlite3."""
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+        try:
+            return value.item()
+        except (ValueError, AttributeError):
+            pass
+    if isinstance(value, bool):
+        return bool(value)
+    return value
+
+
+def _add_column_if_missing(cur, conn, col_name, col_type):
+    """Add a column, rolling back on failure so later statements are not blocked (PostgreSQL)."""
+    try:
+        if USE_SUPABASE:
+            cur.execute(
+                f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+            )
+        else:
+            cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col_name} {col_type}")
+        return True
+    except Exception as e:
+        err = str(e).lower()
+        if "duplicate column" in err or "already exists" in err:
+            _ensure_connection_ready(conn)
+            return False
+        _ensure_connection_ready(conn)
+        print(f"[init_db] Could not add column {col_name}: {e}")
+        return False
+
+
 @st.cache_resource
 def get_connection():
     """Returns a long-lived cached database connection.
@@ -47,6 +111,7 @@ def init_db():
     cur = None
     try:
         conn = get_connection()
+        _ensure_connection_ready(conn)
         cur = conn.cursor()
         
         if USE_SUPABASE:
@@ -219,17 +284,13 @@ def init_db():
         ]
         
         for col_name, col_type in new_columns:
-            try:
-                if USE_SUPABASE:
-                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
-                else:
-                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col_name} {col_type}")
-            except:
-                pass  # Column already exists
-        
+            _add_column_if_missing(cur, conn, col_name, col_type)
+
         conn.commit()
     except Exception as e:
         print(f"[init_db] Error: {e}")
+        if conn is not None:
+            _ensure_connection_ready(conn)
     finally:
         # Only close the cursor we created for schema work.
         # Never close conn here — it comes from @st.cache_resource and is meant to be long-lived.
@@ -240,28 +301,44 @@ def init_db():
                 pass
 
     # Run D-size binning migration only once per process
-    if not hasattr(get_connection, "_migration_done"):
-        migrate_dsize_calculations()
-        get_connection._migration_done = True
+    if not getattr(get_connection, "_migration_done", False):
+        if migrate_dsize_calculations():
+            get_connection._migration_done = True
 
 def save_avalanche(data: dict):
     init_db()
     conn = get_connection()
+    _ensure_connection_ready(conn)
     cur = conn.cursor()
-    
-    columns = ", ".join(data.keys())
-    placeholders = ", ".join(["%s" if USE_SUPABASE else "?" for _ in data])
+
+    filtered = {
+        k: _sanitize_value(v)
+        for k, v in data.items()
+        if k in AVALANCHE_COLUMNS
+    }
+    unknown = set(data.keys()) - AVALANCHE_COLUMNS
+    if unknown:
+        print(f"[save_avalanche] Ignoring unknown columns: {sorted(unknown)}")
+
+    columns = ", ".join(filtered.keys())
+    placeholders = ", ".join(["%s" if USE_SUPABASE else "?" for _ in filtered])
     query = f"INSERT INTO avalanches ({columns}) VALUES ({placeholders})"
-    
-    cur.execute(query, list(data.values()))
-    conn.commit()
-    cur.close()
+
+    try:
+        cur.execute(query, list(filtered.values()))
+        conn.commit()
+    except Exception as e:
+        _ensure_connection_ready(conn)
+        raise RuntimeError(f"Failed to save avalanche record: {e}") from e
+    finally:
+        cur.close()
     # Do NOT close conn here — it is cached via @st.cache_resource
     # Closing it causes "connection already closed" on next use (especially with Supabase)
 
 def load_avalanche_log() -> pd.DataFrame:
     init_db()
     conn = get_connection()
+    _ensure_connection_ready(conn)
     df = pd.read_sql("SELECT * FROM avalanches ORDER BY timestamp DESC", conn)
     # Do NOT close conn here — it is cached via @st.cache_resource.
     # Explicit close breaks the cached connection on subsequent calls (psycopg2).
@@ -280,6 +357,8 @@ def migrate_dsize_calculations():
       - Backfill report_link by extracting any URL from the notes field
       - Set calculated_d_size + dsize_method to the recommended current value
         (mass_midpoint for Quick/Detailed, volume_midpoint for Runout)
+
+    Returns True on success, False on failure.
     """
     import re
     url_pattern = re.compile(r'https?://[^\s<>"\)\]]+')
@@ -288,6 +367,7 @@ def migrate_dsize_calculations():
     cur = None
     try:
         conn = get_connection()
+        _ensure_connection_ready(conn)
         cur = conn.cursor()
 
         # Ensure the columns exist
@@ -308,13 +388,7 @@ def migrate_dsize_calculations():
             ("schema_version", "TEXT"),
             ("entrainment_method", "TEXT"),
         ]:
-            try:
-                if USE_SUPABASE:
-                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col} {typ}")
-                else:
-                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col} {typ}")
-            except:
-                pass
+            _add_column_if_missing(cur, conn, col, typ)
         conn.commit()
 
         # Fetch all records
@@ -395,8 +469,12 @@ def migrate_dsize_calculations():
 
         conn.commit()
         print(f"[D-Size Migration] Processed {updated} records. Backfilled {links_backfilled} report_link(s) from notes.")
+        return True
     except Exception as e:
         print(f"[D-Size Migration] Error: {e}")
+        if conn is not None:
+            _ensure_connection_ready(conn)
+        return False
     finally:
         # Only close cursor. Do not close conn — it is the cached long-lived connection.
         if cur is not None:

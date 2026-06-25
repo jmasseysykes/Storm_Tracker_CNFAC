@@ -200,7 +200,11 @@ def render_save_section(prefix=""):
                 "notes": notes,
             }
             
-            db.save_avalanche(data)
+            try:
+                db.save_avalanche(data)
+            except Exception as e:
+                st.error(f"Could not save to the research database: {e}")
+                st.stop()
             st.success(f"✅ {save_choice} saved successfully!")
             
             # Clear all session states
