@@ -107,13 +107,15 @@ def render_save_section(prefix=""):
     sz_data = st.session_state.get("start_zone_inputs")
     runout_data = st.session_state.get("runout_inputs")
 
+    save_choice = None
+    selected_data = None
     if sz_data or runout_data:
         options = []
         if sz_data:
             options.append(("Start Zone Method", sz_data))
         if runout_data:
             options.append(("Runout/Debris Method", runout_data))
-        
+
         if len(options) > 1:
             save_choice = st.radio(
                 "Which calculation do you want to save?",
@@ -122,10 +124,8 @@ def render_save_section(prefix=""):
                 key=f"{p}save_choice"
             )
             selected_data = next(data for name, data in options if name == save_choice)
-        else:
-            selected_data = options[0][1] if options else None
-    else:
-        selected_data = None
+        elif options:
+            save_choice, selected_data = options[0]
 
     if st.button("💾 Save Avalanche to Research Database", type="primary", use_container_width=True, key=f"{p}save_button"):
         if selected_data:
