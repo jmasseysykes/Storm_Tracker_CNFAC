@@ -19,14 +19,28 @@ else:
 
 @st.cache_resource
 def get_connection():
-    """Cached connection to avoid repeated open/close overhead.
-    Note: For high concurrency on Supabase, consider connection pooling (e.g. pgbouncer).
+    """Returns a long-lived cached database connection.
+
+    IMPORTANT:
+    - Do NOT call conn.close() on the object returned by this function.
+    - Only close cursors (cur.close()).
+    - Closing the cached connection causes "psycopg2.InterfaceError: connection already closed"
+      on subsequent uses (very common with Supabase on Render).
+
+    The connection lives for the lifetime of the Streamlit server process.
     """
     if USE_SUPABASE:
-        return psycopg2.connect(host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
-                                user=DB_USER, password=DB_PASSWORD, sslmode="require")
+        # keepalives help prevent the server from closing idle connections (common on Supabase/Render)
+        return psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
+            user=DB_USER, password=DB_PASSWORD, sslmode="require",
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
+        )
     else:
-        return sqlite3.connect(DB_PATH, check_same_thread=False)  # allow multi-thread for Streamlit
+        return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 def init_db():
     conn = None
@@ -217,14 +231,11 @@ def init_db():
     except Exception as e:
         print(f"[init_db] Error: {e}")
     finally:
+        # Only close the cursor we created for schema work.
+        # Never close conn here — it comes from @st.cache_resource and is meant to be long-lived.
         if cur is not None:
             try:
                 cur.close()
-            except:
-                pass
-        if conn is not None:
-            try:
-                conn.close()
             except:
                 pass
 
@@ -245,13 +256,15 @@ def save_avalanche(data: dict):
     cur.execute(query, list(data.values()))
     conn.commit()
     cur.close()
-    conn.close()
+    # Do NOT close conn here — it is cached via @st.cache_resource
+    # Closing it causes "connection already closed" on next use (especially with Supabase)
 
 def load_avalanche_log() -> pd.DataFrame:
     init_db()
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM avalanches ORDER BY timestamp DESC", conn)
-    conn.close()
+    # Do NOT close conn here — it is cached via @st.cache_resource.
+    # Explicit close breaks the cached connection on subsequent calls (psycopg2).
     return df
 
 
@@ -385,13 +398,10 @@ def migrate_dsize_calculations():
     except Exception as e:
         print(f"[D-Size Migration] Error: {e}")
     finally:
+        # Only close cursor. Do not close conn — it is the cached long-lived connection.
         if cur is not None:
             try:
                 cur.close()
             except Exception:
                 pass
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        # Do NOT close conn here. See comments in get_connection() and load/save.
