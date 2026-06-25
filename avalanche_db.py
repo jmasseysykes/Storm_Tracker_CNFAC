@@ -2,6 +2,7 @@ import os
 import psycopg2
 import sqlite3
 import pandas as pd
+import streamlit as st
 
 import avalanche_calcs as calcs  # for new D-size calculations during migration
 
@@ -16,12 +17,16 @@ if USE_SUPABASE:
 else:
     DB_PATH = "avalanche_log.db"
 
+@st.cache_resource
 def get_connection():
+    """Cached connection to avoid repeated open/close overhead.
+    Note: For high concurrency on Supabase, consider connection pooling (e.g. pgbouncer).
+    """
     if USE_SUPABASE:
         return psycopg2.connect(host=DB_HOST, port=DB_PORT, dbname=DB_NAME,
                                 user=DB_USER, password=DB_PASSWORD, sslmode="require")
     else:
-        return sqlite3.connect(DB_PATH)
+        return sqlite3.connect(DB_PATH, check_same_thread=False)  # allow multi-thread for Streamlit
 
 def init_db():
     conn = get_connection()
@@ -209,8 +214,10 @@ def init_db():
     cur.close()
     conn.close()
 
-    # Run D-size binning migration (idempotent, logs if changes made)
-    migrate_dsize_calculations()
+    # Run D-size binning migration only once per process (idempotent but can be heavy on large tables)
+    if not hasattr(get_connection, "_migration_done"):
+        migrate_dsize_calculations()
+        get_connection._migration_done = True
 
 def save_avalanche(data: dict):
     init_db()

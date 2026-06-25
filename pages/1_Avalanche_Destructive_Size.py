@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
+import os
 import avalanche_calcs as calcs
 import snotel_utils as snotel
 import avalanche_db as db
@@ -53,12 +54,18 @@ st.caption("CNFAC Avalanche Tools — V2.0 (single Start Zone + Runout methods) 
 
 # === D-SIZE CLASSIFICATION CHART (collapsible) ===
 with st.expander("📊 View D-Size Classification Chart — Mass Ranges and Typical Values", expanded=False):
-    st.image(
-        "dsize_scott_binning.png",
-        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale) — Scott Log-Midpoint Binning",
-        use_container_width=False,
-        width=900                    # comfortable size on desktop
-    )
+    # Use path relative to this file so it works reliably in Docker/Render
+    # regardless of working directory.
+    chart_path = os.path.join(os.path.dirname(__file__), "..", "dsize_scott_binning.png")
+    if os.path.exists(chart_path):
+        st.image(
+            chart_path,
+            caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale) — Scott Log-Midpoint Binning",
+            use_container_width=False,
+            width=900                    # comfortable size on desktop
+        )
+    else:
+        st.warning("Chart image not found. Please ensure dsize_scott_binning.png is in the project root.")
     
 # ====================== UNIT SYSTEM TOGGLE ======================
 use_imperial = st.toggle(
@@ -207,15 +214,22 @@ with tab_start:
     st.subheader("Start Zone Method — Slab Volume & Mass Estimate")
     st.caption("Estimate avalanche destructive size from the starting zone. Provide slab dimensions (or a polygon area) and crown depth, then select how to determine density and mass.")
 
-    # Load stations (for optional SNOTEL SWE)
-    try:
-        stations_df = pd.read_csv("SNOTEL_station_list.csv")
-        stations_df["ID"] = stations_df["site_name"].str.extract(r"\((\d+)\)", expand=False).astype(str)
-        stations_df["display_name"] = stations_df["site_name"] + " - " + stations_df["state"]
-        stations_df = stations_df[["display_name", "ID", "state"]].dropna()
+    # Load stations (for optional SNOTEL SWE) - cached to save memory
+    @st.cache_data
+    def load_stations():
+        try:
+            stations_df = pd.read_csv("SNOTEL_station_list.csv")
+            stations_df["ID"] = stations_df["site_name"].str.extract(r"\((\d+)\)", expand=False).astype(str)
+            stations_df["display_name"] = stations_df["site_name"] + " - " + stations_df["state"]
+            stations_df = stations_df[["display_name", "ID", "state"]].dropna()
+            return stations_df
+        except Exception:
+            return None
+
+    stations_df = load_stations()
+    if stations_df is not None:
         station_options = stations_df["display_name"].tolist()
-    except Exception as e:
-        stations_df = None
+    else:
         station_options = ["(SNOTEL list unavailable)"]
 
     hardness_options = ["F-", "F", "F+", "4F-", "4F", "4F+", "1F-", "1F", "1F+", "P-", "P", "P+", "K-", "K", "K+"]
@@ -554,6 +568,8 @@ with tab_start:
         }
         fig = dsize_plot.plot_dsize_with_user_mass(total_m, lo_m, hi_m)
         st.pyplot(fig)
+        import matplotlib.pyplot as plt
+        plt.close(fig)  # free memory
 
     render_save_section(prefix="start")
 
@@ -565,12 +581,16 @@ with tab_runout:
 
     # Reference volume chart (static)
     with st.expander("📊 View Deposit Volume D-Size Classification Chart (Jamieson 2024)", expanded=False):
-        st.image(
-            "dsize_volume_reference.png",
-            caption="Avalanche Destructive Size (D-Size) Classification — Deposit Volume Ranges and Typical Values (Log Scale)",
-            use_container_width=False,
-            width=900
-        )
+        vol_chart_path = os.path.join(os.path.dirname(__file__), "..", "dsize_volume_reference.png")
+        if os.path.exists(vol_chart_path):
+            st.image(
+                vol_chart_path,
+                caption="Avalanche Destructive Size (D-Size) Classification — Deposit Volume Ranges and Typical Values (Log Scale)",
+                use_container_width=False,
+                width=900
+            )
+        else:
+            st.warning("Volume chart image not found. Please ensure dsize_volume_reference.png is in the project root.")
 
     st.caption("Measure or estimate the deposit length, width, and average thickness. Volume is the primary input for D-size.")
 
@@ -714,6 +734,8 @@ with tab_runout:
         # Plot the volume-based D-Size with user's volume + uncertainty bands (no mass needed)
         fig = dsize_plot.plot_dsize_volume_with_user_value(volume_m3, vol_low, vol_high)
         st.pyplot(fig)
+        import matplotlib.pyplot as plt
+        plt.close(fig)  # free memory
         
         if use_custom_density:
             st.caption(f"D-Size from volume only. Optional mass reference shown using your custom density of {density} kg/m³.")
@@ -726,7 +748,10 @@ with tab_runout:
 # ====================== VIEW LOG TAB ======================
 with tab_log:
     st.subheader("📋 Research Database — Saved Avalanches")
-    log_df = db.load_avalanche_log()
+    @st.cache_data(ttl=300)  # cache 5 min to reduce DB load/memory
+    def _load_log():
+        return db.load_avalanche_log()
+    log_df = _load_log()
    
     if log_df.empty:
         st.info("No avalanches saved yet. Calculate and save some entries to build the database!")
