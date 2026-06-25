@@ -85,9 +85,40 @@ def _mark_slab_area_manual():
     st.session_state.sz_area_manual = True
 
 
+def _slab_area_geometry_state():
+    """Resolve whether slab area comes from width × length or a manual area entry."""
+    crown_width = st.session_state.get("sz_crown_width")
+    slab_length = st.session_state.get("sz_slab_length")
+    area_display = st.session_state.get("sz_area_override")
+
+    area_from_dims = (crown_width * slab_length) if crown_width and slab_length else None
+    area_overridden = bool(st.session_state.get("sz_area_manual", False))
+
+    if not area_overridden and area_display is not None and area_from_dims is not None:
+        tol = max(0.5, 0.001 * area_from_dims)
+        area_overridden = abs(area_display - area_from_dims) > tol
+
+    if area_overridden:
+        st.session_state.sz_area_manual = True
+
+    geometry_mode = "area" if area_overridden else "dimensions"
+    crown_width_m = None if area_overridden else (crown_width * conv_length if crown_width else None)
+    slab_length_m = None if area_overridden else (slab_length * conv_length if slab_length else None)
+
+    return {
+        "area_display": area_display,
+        "area_from_dims": area_from_dims,
+        "area_overridden": area_overridden,
+        "geometry_mode": geometry_mode,
+        "crown_width_m": crown_width_m,
+        "slab_length_m": slab_length_m,
+    }
+
+
 def _refresh_start_zone_fields(selected_data: dict) -> dict:
     """Recompute area/volume/mass from the current slab area input before saving."""
-    area_display = st.session_state.get("sz_area_override")
+    geom = _slab_area_geometry_state()
+    area_display = geom["area_display"]
     if area_display is None or area_display <= 0:
         return selected_data
 
@@ -109,14 +140,6 @@ def _refresh_start_zone_fields(selected_data: dict) -> dict:
     entr_m = selected_data.get("entrainment_mass") or 0.0
     total_m = slab_m + entr_m
 
-    crown_width = st.session_state.get("sz_crown_width")
-    slab_length = st.session_state.get("sz_slab_length")
-    area_from_dims = (crown_width * slab_length) if crown_width and slab_length else None
-    area_overridden = (
-        st.session_state.get("sz_area_manual", False)
-        or (area_from_dims is not None and abs(area_display - area_from_dims) > 0.1)
-    )
-
     mid_label = calcs.mass_to_dsize(total_m)["label"] if total_m > 0 else selected_data.get("calculated_d_size")
     vol_label = calcs.volume_m3_to_dsize(vol_m3)["label"] if vol_m3 and vol_m3 > 0 else selected_data.get("dsize_volume_midpoint")
 
@@ -126,8 +149,10 @@ def _refresh_start_zone_fields(selected_data: dict) -> dict:
         "volume_m3": vol_m3,
         "mass_tonnes": slab_m,
         "total_mass": total_m,
-        "area_overridden": area_overridden,
-        "geometry_mode": "polygon_override" if area_overridden else "dimensions",
+        "area_overridden": geom["area_overridden"],
+        "geometry_mode": geom["geometry_mode"],
+        "crown_width_m": geom["crown_width_m"],
+        "slab_length_m": geom["slab_length_m"],
         "calculated_d_size": mid_label,
         "dsize_mass_original": mid_label,
         "dsize_mass_midpoint": mid_label,
@@ -522,13 +547,12 @@ with tab_start:
         e_h = e_g = e_swe = None
 
     if st.button("Calculate Start Zone Estimate", type="primary", use_container_width=True, key="sz_calc_btn"):
+        geom = _slab_area_geometry_state()
+        area_overridden = geom["area_overridden"]
         # Geometry — use the slab area field (manual entry or width × length default)
-        area_m2 = st.session_state.get("sz_area_override", area_display) * conv_area
-        area_from_dims = crown_width * slab_length
-        area_overridden = (
-            st.session_state.get("sz_area_manual", False)
-            or abs(st.session_state.get("sz_area_override", area_display) - area_from_dims) > 0.1
-        )
+        area_m2 = geom["area_display"] * conv_area
+        crown_width_m = geom["crown_width_m"]
+        slab_length_m = geom["slab_length_m"]
         # Use the direct crown depth from Step 1.
         # (In SWE mode we also derive implied density = SWE / depth; grain-based derivation is not used.)
         crown_depth_m = direct_depth_m
@@ -583,8 +607,8 @@ with tab_start:
         st.success(f"**Estimated D-Size: {mid_label}** (uncertainty range: **{lo_label} – {hi_label}**)")
         st.info(f"**Slab Mass**: {slab_m:,.0f} t | **Entrained Mass**: {entr_m:,.0f} t | **Total Mass**: {total_m:,.0f} t ({lo_m:,.0f} – {hi_m:,.0f} t)")
 
-        area_used_display = st.session_state.get("sz_area_override", area_display)
-        area_note = "mapped polygon override" if area_overridden else "width × length"
+        area_used_display = geom["area_display"]
+        area_note = "manual area entry" if area_overridden else "width × length"
         st.caption(
             f"Slab area used: **{area_m2:,.0f} m²** ({area_used_display:,.0f} {unit_area}) — {area_note}"
         )
@@ -608,7 +632,7 @@ with tab_start:
         st.session_state.start_zone_inputs = {
             "schema_version": "2.0",
             "method": "start_zone",
-            "geometry_mode": "polygon_override" if area_overridden else "dimensions",
+            "geometry_mode": geom["geometry_mode"],
             "density_mode": dens_mode,
             "density_profile": density_profile,
             "swe_source": swe_source,
