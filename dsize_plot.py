@@ -4,48 +4,83 @@ import matplotlib.pyplot as plt
 from matplotlib.patheffects import withStroke
 
 def plot_dsize_reference():
-    """Static reference chart (no user data)"""
+    """Static reference chart (no user data) — Scott log-midpoint binning"""
+    # Data from Scott's table (logarithmic midpoint binning)
+    # D1 extended to 17.8 t so bins are contiguous.
+    # Only full D-sizes get typical lines/labels.
     labels = ['D1', 'D1.5', 'D2', 'D2.5', 'D3', 'D3.5', 'D4', 'D4.5', 'D5']
-    min_t    = [1, 10, 75, 250, 750, 2500, 7500, 25000, 75000]
-    max_t    = [10, 75, 250, 750, 2500, 7500, 25000, 75000, 200000]
+    min_t = [1.0, 17.8, 56.2, 177.8, 562, 1778, 5623, 17783, 56234]
+    max_t = [17.8, 56.2, 177.8, 562, 1778, 5623, 17783, 56234, 177828]
     typical_t = [10, None, 100, None, 1000, None, 10000, None, 100000]
 
+    # Yellow → Orange → Red palette
     colors = ['#ffffcc', '#ffeda0', '#fed976', '#feb24c', '#fd8d3c',
               '#fc4e2a', '#e31a1c', '#bd0026', '#800026']
 
     fig, ax = plt.subplots(figsize=(14, 8))
 
     for i in range(len(labels)):
+        # Box from min to max
         ax.fill_between([i - 0.35, i + 0.35], min_t[i], max_t[i],
                         color=colors[i], alpha=0.95, edgecolor='black', linewidth=2)
 
+        # Typical value line + bold label ONLY for full D-sizes (D1, D2, D3, D4, D5)
         if typical_t[i] is not None:
             ax.plot([i - 0.35, i + 0.35], [typical_t[i], typical_t[i]],
-                    color='black', linewidth=6)
-            label_text = "<10 t" if i == 0 else f'{typical_t[i]:,} t'
+                    color='black', linewidth=6, solid_capstyle='butt')
+
+            # Format typical label nicely
+            tval = typical_t[i]
+            if tval >= 1000:
+                t_str = f'{int(tval):,}'
+            elif abs(tval - round(tval)) < 0.01:
+                t_str = f'{int(round(tval))}'
+            else:
+                t_str = f'{tval:.1f}'
+            label_text = f'{t_str} t'
+
             ax.text(i, typical_t[i] * 1.18, label_text,
                     ha='center', va='bottom', fontsize=11, fontweight='bold',
                     path_effects=[withStroke(linewidth=2, foreground='white')])
 
-        ax.text(i, min_t[i] * 0.94 if min_t[i] > 0 else 1, f'{min_t[i]:,}', 
-                ha='center', va='top', fontsize=10)
-        if i == 0:
-            pass
-        elif i == 8:
-            ax.text(i, max_t[i] * 1.08, "∞", ha='center', va='bottom', fontsize=12, fontweight='bold')
+        # Min label (formatted cleanly)
+        if min_t[i] >= 1000:
+            min_str = f'{int(min_t[i]):,}'
+        elif min_t[i] == int(min_t[i]):
+            min_str = f'{int(min_t[i])}'
         else:
-            ax.text(i, max_t[i] * 1.08, f'{max_t[i]:,}', ha='center', va='bottom', fontsize=10)
+            min_str = f'{min_t[i]:.1f}'
+        ax.text(i, min_t[i] * 0.94 if min_t[i] > 0 else 1, min_str,
+                ha='center', va='top', fontsize=10, color='black')
 
-    ax.plot([], [], color='black', linewidth=6, label='Typical value from Destructive Scale')
+        # Max label
+        if i == 8:  # D5
+            ax.text(i, max_t[i] * 1.08, "∞",
+                    ha='center', va='bottom', fontsize=12, fontweight='bold')
+        else:
+            if max_t[i] >= 1000:
+                max_str = f'{int(max_t[i]):,}'
+            elif max_t[i] == int(max_t[i]):
+                max_str = f'{int(max_t[i])}'
+            else:
+                max_str = f'{max_t[i]:.1f}'
+            ax.text(i, max_t[i] * 1.08, max_str,
+                    ha='center', va='bottom', fontsize=10, color='black')
+
+    # Legend
+    ax.plot([], [], color='black', linewidth=6, label='Destructive Scale Typical Value')
     ax.legend(loc='upper left', fontsize=11)
 
     ax.set_yscale('log')
     ax.set_ylabel('Avalanche Mass (tonnes)', fontsize=14)
     ax.set_title('Avalanche Destructive Size (D-Size) Classification\n'
-                 'Mass Ranges and Typical Values (Log Scale)', fontsize=16, pad=20)
+                 'Mass Ranges and Typical Values (Log Scale) — Log-Midpoint Binning',
+                 fontsize=15, pad=20)
+
     ax.grid(True, which='both', alpha=0.3, linestyle='--')
     ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(labels, fontsize=13)
+
     ax.set_yticks([1, 10, 100, 1000, 10000, 100000])
     ax.set_yticklabels(['1', '10', '100', '1,000', '10,000', '100,000'])
 
@@ -76,6 +111,114 @@ def plot_dsize_with_user_mass(user_mass: float, low_mass: float = None, high_mas
         handletextpad=0.8      # spacing between symbol and text
     )
     ax.set_title('Your Avalanche vs D-Size Classification\n'
-                 'Mass Ranges and Typical Values (Log Scale)', fontsize=16, pad=20)
+                 'Mass Ranges and Typical Values (Log Scale) — Log-Midpoint Binning', fontsize=15, pad=20)
+
+    return fig
+
+
+# ==================== VOLUME-BASED D-SIZE PLOTS (Jamieson 2024) ====================
+
+def plot_dsize_volume_reference():
+    """Static reference chart for deposit volume (no user data)"""
+    labels = ['D1', 'D1.5', 'D2', 'D2.5', 'D3', 'D3.5', 'D4', 'D4.5', 'D5']
+
+    # D1 min set to 1 (instead of 0.1) to avoid exaggerating the low end on log scale
+    min_t = [1, 177.8, 562.3, 1778.3, 5623.4, 17782.8, 56234.1, 177827.9, 281170.7]
+    max_t = [177.8, 562.3, 1778.3, 5623.4, 17782.8, 56234.1, 177827.9, 281170.7, 889139.0]
+
+    typical_t = [100, None, 1000, None, 10000, None, 100000, None, 500000]
+
+    colors = ['#ffffcc', '#ffeda0', '#fed976', '#feb24c', '#fd8d3c',
+              '#fc4e2a', '#e31a1c', '#bd0026', '#800026']
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    for i in range(len(labels)):
+        ax.fill_between([i - 0.35, i + 0.35], min_t[i], max_t[i],
+                        color=colors[i], alpha=0.95, edgecolor='black', linewidth=2)
+
+        if typical_t[i] is not None:
+            ax.plot([i - 0.35, i + 0.35], [typical_t[i], typical_t[i]],
+                    color='black', linewidth=6, solid_capstyle='butt')
+
+            tval = typical_t[i]
+            t_str = f'{int(tval):,}' if tval >= 1000 else f'{int(tval)}'
+            label_text = f'{t_str} m³'
+
+            ax.text(i, typical_t[i] * 1.18, label_text,
+                    ha='center', va='bottom', fontsize=11, fontweight='bold',
+                    path_effects=[withStroke(linewidth=2, foreground='white')])
+
+        # Min label formatting
+        if min_t[i] >= 1000:
+            min_str = f'{int(min_t[i]):,}'
+        elif min_t[i] == int(min_t[i]):
+            min_str = f'{int(min_t[i])}'
+        else:
+            min_str = f'{min_t[i]:.1f}'
+        ax.text(i, min_t[i] * 0.94 if min_t[i] > 0 else 1, min_str,
+                ha='center', va='top', fontsize=10, color='black')
+
+        # Max label
+        if i == 8:
+            ax.text(i, max_t[i] * 1.05, "∞",
+                    ha='center', va='bottom', fontsize=12, fontweight='bold')
+        else:
+            if max_t[i] >= 1000:
+                max_str = f'{int(max_t[i]):,}'
+            elif max_t[i] == int(max_t[i]):
+                max_str = f'{int(max_t[i])}'
+            else:
+                max_str = f'{max_t[i]:.1f}'
+            ax.text(i, max_t[i] * 1.08, max_str,
+                    ha='center', va='bottom', fontsize=10, color='black')
+
+    ax.plot([], [], color='black', linewidth=6, label='Typical Deposit Volume (Jamieson 2024)')
+    ax.legend(loc='upper left', fontsize=11)
+
+    ax.set_yscale('log')
+    ax.set_ylim(bottom=1)
+    ax.set_ylabel('Avalanche Deposit Volume (m³)', fontsize=14)
+    ax.set_title('Avalanche Destructive Size (D-Size) Classification\n'
+                 'Deposit Volume Ranges and Typical Values (Log Scale)\n'
+                 'Jamieson 2024 + Log-Midpoint Binning (EAWS/MoTI inspired)',
+                 fontsize=14, pad=20)
+
+    ax.grid(True, which='both', alpha=0.3, linestyle='--')
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontsize=13)
+
+    ax.set_yticks([1, 10, 100, 1000, 10000, 100000, 1000000])
+    ax.set_yticklabels(['1', '10', '100', '1,000', '10,000', '100,000', '1,000,000'])
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_dsize_volume_with_user_value(user_volume: float, low_volume: float = None, high_volume: float = None):
+    """Dynamic chart showing the user's calculated deposit volume + uncertainty range (for runout/debris)"""
+    fig = plot_dsize_volume_reference()  # reuse the static reference chart
+    ax = fig.axes[0]
+
+    # User's estimated volume (thick black line)
+    ax.axhline(y=user_volume, color='black', linewidth=3, linestyle='-.',
+               label=f'Your estimated volume: {user_volume:,.0f} m³')
+
+    # Uncertainty range (shaded horizontal band + legend)
+    if low_volume is not None and high_volume is not None:
+        ax.fill_between([0, 8], low_volume, high_volume,
+                        color='blue', alpha=0.5,
+                        label=f'Uncertainty range: {low_volume:,.0f} – {high_volume:,.0f} m³')
+
+    ax.legend(
+        loc='upper left',
+        fontsize=14,
+        handlelength=4.5,
+        handleheight=2.0,
+        handletextpad=0.8
+    )
+    ax.set_title('Your Avalanche Deposit Volume vs D-Size Classification\n'
+                 'Deposit Volume Ranges and Typical Values (Log Scale)',
+                 fontsize=14, pad=20)
 
     return fig

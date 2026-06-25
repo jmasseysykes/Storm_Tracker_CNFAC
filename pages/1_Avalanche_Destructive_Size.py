@@ -26,13 +26,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("Avalanche Destructive Size Estimator")
-st.caption("CNFAC Avalanche Tools — ISSW Project with Erich Peitzsch, Zach Guy, Ron Simenhois, and Bruce Jamieson")
+st.caption("CNFAC Avalanche Tools — V2.0 (single Start Zone + Runout methods) — ISSW Project with Erich Peitzsch, Zach Guy, Ron Simenhois, and Bruce Jamieson")
+
+# === VIDEO WALKTHROUGH (commented out until video is uploaded) ===
+# st.markdown("**New to the tool?** Open the 📹 **2-minute personal walkthrough** right below for a quick guided tour.")
+#
+# with st.expander("📹 Watch a 2-minute personal walkthrough (highly recommended for first-time users)", expanded=False):
+#     # === HOW TO ADD YOUR VIDEO ===
+#     # 1. Record a short ~2 min screen recording + voiceover
+#     # 2. Upload to YouTube (unlisted is perfect) or host a direct .mp4
+#     # 3. Update YOUTUBE_ID below
+#     YOUTUBE_ID = "REPLACE_WITH_YOUR_YOUTUBE_VIDEO_ID"
+#     DIRECT_MP4_URL = ""
+#
+#     if YOUTUBE_ID and "REPLACE_WITH_YOUR" not in YOUTUBE_ID:
+#         st.components.v1.iframe(
+#             f"https://www.youtube.com/embed/{YOUTUBE_ID}?rel=0&modestbranding=1",
+#             height=420
+#         )
+#     elif DIRECT_MP4_URL:
+#         st.video(DIRECT_MP4_URL)
+#     else:
+#         st.info("👆 Replace `YOUTUBE_ID` near the top of this file with your actual video.")
+#
+#     st.caption("A personal, short introduction to the current V2 interface — choosing density methods, using entrainment, and understanding the results.")
 
 # === D-SIZE CLASSIFICATION CHART (collapsible) ===
 with st.expander("📊 View D-Size Classification Chart — Mass Ranges and Typical Values", expanded=False):
     st.image(
-        "dsize_yellow_orange_red_final.png",
-        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale)",
+        "dsize_scott_binning.png",
+        caption="Avalanche Destructive Size (D-Size) Classification — Mass Ranges and Typical Values (Log Scale) — Scott Log-Midpoint Binning",
         use_container_width=False,
         width=900                    # comfortable size on desktop
     )
@@ -51,614 +74,655 @@ conv_length = 0.3048 if use_imperial else 1.0          # ft → m
 conv_area = conv_length ** 2                            # ft² → m²
 
 # ====================== TABS ======================
-tab_quick, tab_detailed, tab_runout, tab_log = st.tabs([
-    "Quick Field Method",
-    "Detailed SNOTEL Method",
-    "Runout / Debris Estimate",
+tab_start, tab_runout, tab_log = st.tabs([
+    "Start Zone Method",
+    "Runout/Debris Method",
     "📋 View Saved Avalanches"
 ])
 
-# ====================== QUICK FIELD METHOD ======================
-with tab_quick:
-    st.subheader("Quick Method — Slab Dimensions + Hand Hardness & Grain Type")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        crown_width = st.number_input(f"Crown Width ({unit_length})",
-                                      value=250.0 if use_imperial else 80.0,
-                                      min_value=1.0, step=1.0)
-        slab_length = st.number_input(f"Slab Length — crown to stauchwall ({unit_length})",
-                                      value=500.0 if use_imperial else 150.0,
-                                      min_value=1.0, step=1.0)
-        depth = st.number_input(f"Slab Depth / Crown Thickness ({unit_length})",
-                                value=2.5 if use_imperial else 0.8,
-                                min_value=0.1, step=0.1)
+def render_save_section(prefix=""):
+    """Render the save-to-research-DB section.
+    Called only from inside the Start Zone and Runout tabs so it does not appear on the View Saved page.
+    Use a prefix so keys are unique when the function is called from multiple tabs.
+    """
+    st.divider()
+    st.subheader("💾 Save to Research Database")
+
+    p = f"{prefix}_" if prefix else ""
+    observer = st.text_input("Observer Name", value="Your Name", key=f"{p}observer")
+    location = st.text_input("Avalanche Location", placeholder="e.g. Chugach Mtns, AK — crown visible from highway", key=f"{p}location")
+    report_link = st.text_input("Avalanche Report Link (optional)", placeholder="https://... (e.g. public avalanche report or observation)", key=f"{p}report_link")
+    field_d_size_options = ["D1", "D1.5", "D2", "D2.5", "D3", "D3.5", "D4", "D4.5", "D5"]
+    field_assessed_d_size = st.selectbox("Field-Assessed D-Size (what you think it actually was)", field_d_size_options, key=f"{p}field_assessed_d_size")
+    notes = st.text_area("Notes", placeholder="Optional observation notes, photos description, weather, etc.", height=100, key=f"{p}notes")
+
+    # === SMART SAVE LOGIC - Supports Start Zone (combined) and Runout ===
+    sz_data = st.session_state.get("start_zone_inputs")
+    runout_data = st.session_state.get("runout_inputs")
+
+    if sz_data or runout_data:
+        options = []
+        if sz_data:
+            options.append(("Start Zone Method", sz_data))
+        if runout_data:
+            options.append(("Runout/Debris Method", runout_data))
         
-        area_quick_input = st.number_input(
-            f"Slab Area ({unit_area}) — optional",
-            value=crown_width * slab_length,
-            min_value=10.0,
-            help="Auto-calculated from Crown Width × Slab Length."
-        )
-        
-        include_entrainment = st.toggle("Include Entrainment Mass", value=False, key="quick_entr_toggle")
-    
-    with col2:
-        hardness_options = ["F-", "F", "F+", "4F-", "4F", "4F+", "1F-", "1F", "1F+", "P-", "P", "P+", "K-", "K", "K+"]
-        hardness = st.selectbox("Hand Hardness (Slab)", hardness_options, index=4)
-        
-        grain_options = [
-            "Precipitation Particles (PP)", "Graupel (PPgp)", "Decomposing/Fragmented (DF)",
-            "Rounded Grains (RG)", "Faceted Rounded (RGxf)", "Faceted Crystals (FC)",
-            "Rounding Faceted (FCxr)", "Depth Hoar (DH)", "Melt-Freeze Crust (MFcr)"
-        ]
-        grain = st.selectbox("Grain Type (Slab)", grain_options, index=3)
-        
-        use_layered_density = st.toggle("Use Layered Slab Profile for Density (more accurate)", value=False)
-    
-    # === ADVANCED UNCERTAINTY ===
-    with st.expander("🔧 Advanced Uncertainty (per input) — RSS Method", expanded=False):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            unc_lw = st.slider("Crown Width / Slab Length / Area uncertainty %", 0, 50, 15, key="quick_lw")
-            unc_depth = st.slider("Depth / Slab thickness uncertainty %", 0, 50, 15, key="quick_depth")
-        with col_b:
-            unc_density = st.slider("Density uncertainty %", 0, 50, 20, key="quick_density")
-            if include_entrainment:
-                unc_entrainment = st.slider("Entrainment uncertainty %", 0, 50, 25, key="quick_entr")
-    
-    # === LAYERED DENSITY INPUT ===
-    if use_layered_density:
-        st.markdown("**Define Slab Layers (top to bottom)**")
-        if "layers" not in st.session_state:
-            st.session_state.layers = [{"thickness_cm": 30, "hardness": "4F", "grain": "Rounded Grains (RG)"}]
-        
-        layers = st.session_state.layers
-        for i in range(len(layers)):
-            col_a, col_b, col_c, col_d = st.columns([2, 2, 2, 1])
-            with col_a:
-                layers[i]["thickness_cm"] = st.number_input(f"Layer {i+1} Thickness (cm)",
-                                                           value=layers[i]["thickness_cm"],
-                                                           min_value=1, key=f"thick_{i}")
-            with col_b:
-                layers[i]["hardness"] = st.selectbox("Hardness", hardness_options,
-                                                    index=hardness_options.index(layers[i]["hardness"]),
-                                                    key=f"hard_{i}")
-            with col_c:
-                layers[i]["grain"] = st.selectbox("Grain Type", grain_options,
-                                                 index=grain_options.index(layers[i]["grain"]),
-                                                 key=f"grain_{i}")
-            with col_d:
-                if st.button("🗑", key=f"del_{i}"):
-                    layers.pop(i)
-                    st.rerun()
-        
-        if st.button("➕ Add Layer"):
-            layers.append({"thickness_cm": 20, "hardness": "4F", "grain": "Rounded Grains (RG)"})
-            st.rerun()
-    
-        # === UNIFIED ENTRAINMENT ===
-    if include_entrainment:
-        st.markdown("**Entrainment Estimation**")
-        entr_method = st.radio("Entrainment Calculation Method", 
-                               ["Dimensions + Hardness/Grain", "SWE-based"], 
-                               horizontal=True, key="quick_entr_method")
-        
-        col_e1, col_e2 = st.columns([1, 1])
-        with col_e1:
-            entr_width = st.number_input(f"Entrainment Width ({unit_length})", 
-                                         value=crown_width * 1.5, min_value=1.0, step=1.0, 
-                                         key="q_entr_width")
-            entr_length = st.number_input(f"Entrainment Length ({unit_length})", 
-                                          value=slab_length * 2, min_value=1.0, step=1.0, 
-                                          key="q_entr_length")
-            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", 
-                                        value=entr_width * entr_length, min_value=10.0, 
-                                        key="q_entr_area")
-            entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", 
-                                         value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05, 
-                                         key="q_entr_depth")
-        
-        with col_e2:
-            if entr_method == "Dimensions + Hardness/Grain":
-                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1, key="q_entr_hardness")
-                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="q_entr_grain")
-            else:
-                entr_swe = st.number_input(f"Entrainment SWE ({swe_unit})", 
-                                           value=1.5 if use_imperial else 40.0, 
-                                           min_value=0.0, step=10.0, 
-                                           key="q_entr_swe")
-    if st.button("Calculate Quick Method", type="primary", use_container_width=True):
-        crown_width_m = crown_width * conv_length
-        slab_length_m = slab_length * conv_length
-        depth_m = depth * conv_length
-        slab_area_m2 = area_quick_input * conv_area
-        volume_m3 = slab_area_m2 * depth_m
-        
-        # Slab Density
-        if use_layered_density and "layers" in st.session_state and st.session_state.layers:
-            total_thickness = 0
-            weighted_density = 0
-            for layer in st.session_state.layers:
-                layer_density = calcs.get_density_from_hardness_grain(layer["hardness"], layer["grain"])
-                weighted_density += layer_density * layer["thickness_cm"]
-                total_thickness += layer["thickness_cm"]
-            density = weighted_density / total_thickness if total_thickness > 0 else 250
+        if len(options) > 1:
+            save_choice = st.radio(
+                "Which calculation do you want to save?",
+                [name for name, _ in options],
+                horizontal=True,
+                key=f"{p}save_choice"
+            )
+            selected_data = next(data for name, data in options if name == save_choice)
         else:
-            density = calcs.get_density_from_hardness_grain(hardness, grain)
-        
-        slab_mass = volume_m3 * density / 1000.0
-        
-        # ==================== ENTRAINMENT ====================
-        entrainment_mass = 0.0
-        if include_entrainment:
-            entr_area_m2 = entr_area * conv_area
-            entr_depth_m = entr_depth * conv_length
+            selected_data = options[0][1] if options else None
+    else:
+        selected_data = None
+
+    if st.button("💾 Save Avalanche to Research Database", type="primary", use_container_width=True, key=f"{p}save_button"):
+        if selected_data:
+            data = {
+                "timestamp": pd.Timestamp.now().isoformat(),
+                "observer": observer,
+                "location": location,
+                "report_link": report_link,
+                "schema_version": selected_data.get("schema_version"),
+                "method": selected_data.get("method"),
+                "geometry_mode": selected_data.get("geometry_mode"),
+                "density_mode": selected_data.get("density_mode"),
+                "density_profile": selected_data.get("density_profile"),
+                "swe_source": selected_data.get("swe_source"),
+                "area_overridden": selected_data.get("area_overridden"),
+                "entrainment_method": selected_data.get("entrainment_method") or selected_data.get("entrainment_method_choice"),
+                "area_m2": selected_data.get("area_m2"),
+                "volume_m3": selected_data.get("volume_m3"),
+                "mass_tonnes": selected_data.get("mass_tonnes"),
+                "entrainment_mass": selected_data.get("entrainment_mass"),
+                "total_mass": selected_data.get("total_mass") or selected_data.get("mass_tonnes"),
+                "calculated_d_size": selected_data.get("calculated_d_size"),
+                "dsize_method": selected_data.get("dsize_method"),
+                "original_calculated_d_size": selected_data.get("original_calculated_d_size"),
+                "dsize_mass_original": selected_data.get("dsize_mass_original"),
+                "dsize_mass_midpoint": selected_data.get("dsize_mass_midpoint"),
+                "dsize_volume_midpoint": selected_data.get("dsize_volume_midpoint"),
+                "unc_low": selected_data.get("unc_low"),
+                "unc_high": selected_data.get("unc_high"),
+                "field_assessed_d_size": field_assessed_d_size,
+                
+                # Slab / Start Zone fields
+                "crown_width_m": selected_data.get("crown_width_m"),
+                "slab_length_m": selected_data.get("slab_length_m"),
+                "depth_m": selected_data.get("depth_m"),
+                "crown_depth_direct_m": selected_data.get("crown_depth_direct_m"),
+                "crown_depth_derived_m": selected_data.get("crown_depth_derived_m"),
+                "hardness": selected_data.get("hardness"),
+                "grain": selected_data.get("grain"),
+                "density_kgm3": selected_data.get("density_kgm3"),
+                "use_layered_density": selected_data.get("use_layered_density"),
+                
+                # (Legacy detailed/SNOTEL fields - populated if present)
+                "weak_layer_date": selected_data.get("weak_layer_date"),
+                "release_date": selected_data.get("release_date"),
+                "snotel_station": selected_data.get("snotel_station"),
+                "slab_swe_mm": selected_data.get("slab_swe_mm"),
+                "adjusted_swe_mm": selected_data.get("adjusted_swe_mm"),
+                "burial_depth_ref_m": selected_data.get("burial_depth_ref_m"),
+                
+                # Entrainment fields
+                "include_entrainment": selected_data.get("include_entrainment"),
+                "entr_width_m": selected_data.get("entr_width_m"),
+                "entr_length_m": selected_data.get("entr_length_m"),
+                "entr_area_m2": selected_data.get("entr_area_m2"),
+                "entr_depth_m": selected_data.get("entr_depth_m"),
+                "entr_hardness": selected_data.get("entr_hardness"),
+                "entr_grain": selected_data.get("entr_grain"),
+                "entr_swe_mm": selected_data.get("entr_swe_mm"),
+                
+                # Runout/Debris specific
+                "debris_type": selected_data.get("debris_type"),
+                
+                # Uncertainty values (trying multiple possible keys)
+                "unc_lw_pct": selected_data.get("unc_lw") or selected_data.get("unc_lw_pct"),
+                "unc_depth_pct": selected_data.get("unc_depth") or selected_data.get("unc_depth_pct"),
+                "unc_density_pct": selected_data.get("unc_density") or selected_data.get("unc_density_pct"),
+                "unc_area_pct": selected_data.get("unc_area") or selected_data.get("unc_area_pct"),
+                "unc_swe_pct": selected_data.get("unc_swe") or selected_data.get("unc_swe_pct"),
+                "unc_runout_pct": selected_data.get("unc_runout") or selected_data.get("unc_runout_pct"),
+                "unc_entrainment_pct": selected_data.get("unc_entr") or selected_data.get("unc_entrainment") or selected_data.get("unc_entrainment_pct"),
+                "notes": notes,
+            }
             
-            if entr_method == "SWE-based":
-                # Use manual SWE if entered
-                if 'entr_swe' in locals() and entr_swe is not None and entr_swe > 0:
-                    entr_swe_mm = entr_swe * 25.4 if use_imperial else entr_swe
-                else:
-                    # Fallback to hardness/grain method
-                    entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
-                    entr_swe_mm = entr_density * entr_depth * conv_length * 1000
-            else:
-                # Dimensions + Hardness/Grain
-                entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
-                entr_swe_mm = entr_density * entr_depth * conv_length * 1000
+            db.save_avalanche(data)
+            st.success(f"✅ {save_choice} saved successfully!")
             
-            entrainment_mass = entr_area_m2 * (entr_swe_mm / 1000.0)
-        
-        total_mass = slab_mass + entrainment_mass
-        
-        # Uncertainty (RSS)
-        unc_lw_val = st.session_state.get("quick_lw", 15)
-        unc_depth_val = st.session_state.get("quick_depth", 15)
-        unc_density_val = st.session_state.get("quick_density", 20)
-        unc_entr_val = st.session_state.get("quick_entr_unc", 25) if include_entrainment else 0
-        
-        total_rel_unc = (
-            (unc_lw_val / 100.0)**2 +
-            (unc_depth_val / 100.0)**2 +
-            (unc_density_val / 100.0)**2
-        )
-        if include_entrainment:
-            total_rel_unc += (unc_entr_val / 100.0)**2
-        total_rel_unc = total_rel_unc ** 0.5
-        
-        f = 1 + total_rel_unc
-        low_mass = total_mass / f
-        high_mass = total_mass * f
-        
-        mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
-            total_mass,
-            unc_length_width_pct=unc_lw_val,
-            unc_depth_pct=unc_depth_val,
-            unc_density_pct=unc_density_val
-        )
-        
-        st.success(f"**Estimated D-Size: {mid_d}** (uncertainty range: **{low_d} – {high_d}**)")
-        
-        st.info(f"**Slab Mass**: {slab_mass:,.0f} t | **Entrained Mass**: {entrainment_mass:,.0f} t | "
-                f"**Total Mass**: {total_mass:,.0f} tonnes")
-        
-        st.caption(calcs.get_dsize_range_string(total_mass))
-        
-        # Store
-        st.session_state.quick_inputs = {
-            "method": "Quick",
-            "area_m2": slab_area_m2,
-            "volume_m3": volume_m3,
-            "mass_tonnes": slab_mass,
-            "entrainment_mass": entrainment_mass,
-            "total_mass": total_mass,
-            "calculated_d_size": mid_d,
-            "unc_low": low_d,
-            "unc_high": high_d,
-            "low_mass": low_mass,
-            "high_mass": high_mass,
-            "crown_width_m": crown_width_m,
-            "slab_length_m": slab_length_m,
-            "depth_m": depth_m,
-            "hardness": hardness,
-            "grain": grain,
-            "density_kgm3": density,
-            "use_layered_density": use_layered_density,
-            "include_entrainment": include_entrainment
-        }
-        
-        fig = dsize_plot.plot_dsize_with_user_mass(total_mass, low_mass, high_mass)
-        st.pyplot(fig)
-        
-# ====================== DETAILED SNOTEL METHOD ======================
-with tab_detailed:
-    st.subheader("Detailed Method — Slab Area + Slab SWE")
-    
-    # Station Loading
+            # Clear all session states
+            for key in ["start_zone_inputs", "runout_inputs", "quick_inputs", "detailed_inputs"]:
+                st.session_state.pop(key, None)
+        else:
+            st.warning("Calculate at least one method before saving.")
+
+
+with tab_start:
+    st.subheader("Start Zone Method — Slab Volume & Mass Estimate")
+    st.caption("Estimate avalanche destructive size from the starting zone. Provide slab dimensions (or a polygon area) and crown depth, then select how to determine density and mass.")
+
+    # Load stations (for optional SNOTEL SWE)
     try:
         stations_df = pd.read_csv("SNOTEL_station_list.csv")
-        stations_df['ID'] = stations_df['site_name'].str.extract(r'\((\d+)\)', expand=False).astype(str)
-        stations_df['display_name'] = stations_df['site_name'] + " - " + stations_df['state']
-        stations_df = stations_df[['display_name', 'ID', 'state']].dropna()
-        station_options = stations_df['display_name'].tolist()
+        stations_df["ID"] = stations_df["site_name"].str.extract(r"\((\d+)\)", expand=False).astype(str)
+        stations_df["display_name"] = stations_df["site_name"] + " - " + stations_df["state"]
+        stations_df = stations_df[["display_name", "ID", "state"]].dropna()
+        station_options = stations_df["display_name"].tolist()
     except Exception as e:
-        st.error(f"Could not load SNOTEL_station_list.csv: {e}")
-        station_options = ["Error loading stations"]
-    
+        stations_df = None
+        station_options = ["(SNOTEL list unavailable)"]
+
+    hardness_options = ["F-", "F", "F+", "4F-", "4F", "4F+", "1F-", "1F", "1F+", "P-", "P", "P+", "K-", "K", "K+"]
+    grain_options = [
+        "Precipitation Particles (PP)", "Graupel (PPgp)", "Decomposing/Fragmented (DF)",
+        "Rounded Grains (RG)", "Faceted Rounded (RGxf)", "Faceted Crystals (FC)",
+        "Rounding Faceted (FCxr)", "Depth Hoar (DH)", "Melt-Freeze Crust (MFcr)"
+    ]
+
+    # 1. Slab dimensions
+    st.markdown("### 1. Slab dimensions")
+    st.caption("Enter crown width and slab length to calculate area (or override with a mapped polygon area). Record your best field estimate of average crown depth. These values are used to compute slab volume.")
     col1, col2 = st.columns([1, 1])
-    
     with col1:
-        selected_display = st.selectbox("Nearby SNOTEL Station (Slab)", station_options)
-        if selected_display:
-            selected_row = stations_df[stations_df['display_name'] == selected_display].iloc[0]
-            station_id = selected_row['ID']
-            state = selected_row['state']
-            station_triplet = f"{station_id}:{state}:SNTL"
-            station_name = selected_display.split(" - ")[0]
-        else:
-            station_triplet = None
-            station_name = None
-        
-        weak_date = st.date_input("Weak Layer Date (Slab)", value=date(2025, 1, 15), min_value=date(1960, 1, 1))
-        release_date = st.date_input("Avalanche Release Date (Slab)", value=date(2025, 2, 10), min_value=date(1960, 1, 1))
-        
-        include_entrainment = st.toggle("Include Entrainment Mass", value=False, key="detailed_entr_toggle")
-    
+        crown_width = st.number_input(f"Crown Width ({unit_length})",
+                                      value=80.0 if not use_imperial else 250.0,
+                                      min_value=1.0, step=1.0, key="sz_crown_width")
+        slab_length = st.number_input(f"Slab Length — crown to stauchwall ({unit_length})",
+                                      value=150.0 if not use_imperial else 500.0,
+                                      min_value=1.0, step=1.0, key="sz_slab_length")
+        area_from_dims = crown_width * slab_length
+        area_display = st.number_input(
+            f"Area ({unit_area}) — optional polygon override (defaults to width × length)",
+            value=area_from_dims, min_value=10.0, key="sz_area_override"
+        )
+        crown_width_m = crown_width * conv_length
+        slab_length_m = slab_length * conv_length
+
     with col2:
-        area_detailed_input = st.number_input(f"Slab Area ({unit_area})", value=80000.0 if use_imperial else 8000.0, min_value=100.0)
-        
-        swe_unit = "inches" if use_imperial else "mm"
-        manual_swe_value = st.number_input(
-            f"Manual Slab SWE Estimate ({swe_unit}) — Optional",
-            value=None, min_value=0.0, step=0.1
+        direct_depth_display = st.number_input(f"Crown depth / slab thickness — direct field estimate ({unit_length})",
+                                               value=0.8 if not use_imperial else 2.5,
+                                               min_value=0.05, step=0.05, key="sz_direct_depth")
+        direct_depth_m = direct_depth_display * conv_length
+
+    with st.expander("🔧 Uncertainty for Slab Dimensions (optional)", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            unc_area = st.slider("Area (length × width) uncertainty %", 0, 50, 15, key="sz_unc_area")
+        with c2:
+            unc_depth = st.slider("Depth uncertainty %", 0, 50, 15, key="sz_unc_depth")
+
+    # 2. DENSITY
+    st.markdown("### 2. Slab Density")
+    dens_mode = st.radio(
+        "Density approach",
+        ["Layer density + grain type", "SWE based density estimate"],
+        horizontal=True,
+        key="sz_dens_mode"
+    )
+
+    if dens_mode == "Layer density + grain type":
+        st.caption("Use hand hardness and grain type observed in the snowpack to estimate density. The simple option uses one value for the whole slab; the detailed option lets you define multiple layers with different properties.")
+    else:
+        st.caption("Use snow water equivalent (SWE) to calculate slab mass directly from area. Density is back-calculated from the crown depth you measured. Grain type is not required.")
+
+    density = 250.0
+    swe_mm = 0.0
+    depth_derived_m = None
+    use_layered = False
+    station_name = None
+    use_swe_for_mass = False
+    hardness = None
+    grain = None
+
+    if dens_mode == "Layer density + grain type":
+        use_swe_for_mass = False
+        # Second radio: simple hand hardness + grain is default inside "Layer density + grain type"
+        profile = st.radio(
+            "Density from grain type / hardness",
+            ["Simple (hand hardness + grain type)", "Detailed layer profile"],
+            horizontal=True,
+            key="sz_density_profile",
+            index=0
         )
-        
-        swe_adjust = st.slider("Local SWE Adjustment (±%)", -50, 50, 0)
-        burial_depth_ref = st.number_input(f"Slab thickness ({unit_length}) — reference only",
-                                           value=2.5 if use_imperial else 0.8, min_value=0.1, step=0.1)
-    
-    # === ADVANCED UNCERTAINTY ===
-    with st.expander("🔧 Advanced Uncertainty (per input) — RSS Method", expanded=False):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            unc_area = st.slider("Slab Area uncertainty %", 0, 50, 15, key="detailed_area")
-            unc_swe = st.slider("Slab SWE uncertainty %", 0, 50, 10, key="detailed_swe")
-        with col_b:
-            if include_entrainment:
-                unc_entrainment = st.slider("Entrainment uncertainty %", 0, 50, 25, key="detailed_entr")
-    
-        # === UNIFIED ENTRAINMENT ===
-    if include_entrainment:
-        st.markdown("**Entrainment Estimation**")
-        entr_method = st.radio("Entrainment Calculation Method", 
-                               ["Dimensions + Hardness/Grain", "SWE-based"], 
-                               horizontal=True, key="detailed_entr_method")
-        
-        col_e1, col_e2 = st.columns([1, 1])
-        with col_e1:
-            entr_width = st.number_input(f"Entrainment Width ({unit_length})", 
-                                         value=200.0 if use_imperial else 60.0, min_value=1.0, step=1.0, 
-                                         key="d_entr_width")
-            entr_length = st.number_input(f"Entrainment Length ({unit_length})", 
-                                          value=800.0 if use_imperial else 250.0, min_value=1.0, step=1.0, 
-                                          key="d_entr_length")
-            entr_area = st.number_input(f"Entrainment Area ({unit_area}) — optional", 
-                                        value=entr_width * entr_length, min_value=10.0, 
-                                        key="d_entr_area")
-            entr_depth = st.number_input(f"Entrainment Depth ({unit_length})", 
-                                         value=1.0 if use_imperial else 0.3, min_value=0.05, step=0.05, 
-                                         key="d_entr_depth")
-        
-        with col_e2:
-            if entr_method == "Dimensions + Hardness/Grain":
-                entr_hardness = st.selectbox("Entrainment Hardness", hardness_options, index=1, key="d_entr_hardness")
-                entr_grain = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="d_entr_grain")
-            else:
-                entr_weak_date = st.date_input("Entrainment Weak Layer Date", value=weak_date, min_value=date(1960, 1, 1), key="d_entr_weak_date")
-                entr_release_date = st.date_input("Entrainment Release Date", value=release_date, min_value=date(1960, 1, 1), key="d_entr_release_date")
-                entr_manual_swe = st.number_input(
-                    f"Manual Entrainment SWE ({swe_unit}) — Optional",
-                    value=None, min_value=0.0, step=0.1, 
-                    key="d_entr_manual_swe"
-                )
-                
-                
-    
-    if st.button("Calculate Detailed SNOTEL Method", type="primary", use_container_width=True):
-        # ==================== SLAB MASS ====================
-        if manual_swe_value is not None and manual_swe_value > 0:
-            slab_swe_mm = manual_swe_value * 25.4 if use_imperial else manual_swe_value
+
+        if profile == "Simple (hand hardness + grain type)":
+            use_layered = False
+            hardness = st.selectbox("Hand Hardness (Slab)", hardness_options, index=4, key="sz_hard")
+            grain = st.selectbox("Grain Type (Slab)", grain_options, index=3, key="sz_grain")
+            density = calcs.get_density_from_hardness_grain(hardness, grain)
+            st.caption(f"Computed slab density: **{density:.0f} kg/m³** (from hardness + grain)")
         else:
-            slab_data = snotel.get_slab_swe(station_triplet, str(weak_date), str(release_date))
-            slab_swe_mm = slab_data.get("slab_swe_mm", 0) if isinstance(slab_data, dict) and "error" not in slab_data else 0
-        
-        adjusted_slab_swe_mm = slab_swe_mm * (1 + swe_adjust / 100.0)
-        slab_area_m2 = area_detailed_input * conv_area
-        slab_mass = slab_area_m2 * (adjusted_slab_swe_mm / 1000.0)
-        
-        # ==================== ENTRAINMENT MASS ====================
-        entrainment_mass = 0.0
-        if include_entrainment:
-            entr_area_m2 = entr_area * conv_area
-            
-            if entr_method == "SWE-based":
-                if entr_manual_swe is not None and entr_manual_swe > 0:
-                    entr_swe_mm = entr_manual_swe * 25.4 if use_imperial else entr_manual_swe
-                else:
-                    entr_data = snotel.get_slab_swe(station_triplet, str(entr_weak_date), str(entr_release_date))
-                    entr_swe_mm = entr_data.get("slab_swe_mm", 0) if isinstance(entr_data, dict) and "error" not in entr_data else 0
+            # Detailed multi-layer
+            use_layered = True
+            st.markdown("**Define Slab Layers (top to bottom)**")
+            if "sz_layers" not in st.session_state:
+                st.session_state.sz_layers = [{"thickness_cm": 30, "hardness": "4F", "grain": "Rounded Grains (RG)"}]
+            layers = st.session_state.sz_layers
+            for i in range(len(layers)):
+                ca, cb, cc, cd = st.columns([2, 2, 2, 1])
+                with ca:
+                    layers[i]["thickness_cm"] = st.number_input(f"Layer {i+1} Thickness (cm)",
+                                                                value=layers[i]["thickness_cm"],
+                                                                min_value=1, key=f"sz_thick_{i}")
+                with cb:
+                    layers[i]["hardness"] = st.selectbox("Hardness", hardness_options,
+                                                         index=hardness_options.index(layers[i]["hardness"]),
+                                                         key=f"sz_hard_{i}")
+                with cc:
+                    layers[i]["grain"] = st.selectbox("Grain Type", grain_options,
+                                                      index=grain_options.index(layers[i]["grain"]),
+                                                      key=f"sz_grain_{i}")
+                with cd:
+                    if st.button("🗑", key=f"sz_del_{i}"):
+                        layers.pop(i)
+                        st.rerun()
+            if st.button("➕ Add Layer", key="sz_add_layer"):
+                layers.append({"thickness_cm": 20, "hardness": "4F", "grain": "Rounded Grains (RG)"})
+                st.rerun()
+            # compute weighted density
+            tot_th = 0.0
+            w_dens = 0.0
+            for ly in layers:
+                d = calcs.get_density_from_hardness_grain(ly["hardness"], ly["grain"])
+                w_dens += d * ly["thickness_cm"]
+                tot_th += ly["thickness_cm"]
+            density = w_dens / tot_th if tot_th > 0 else 250.0
+            st.caption(f"Computed average slab density: **{density:.0f} kg/m³** (from layers)")
+    else:
+        # SWE mode
+        use_swe_for_mass = True
+        use_layered = False
+        swe_src = st.radio("SWE source", ["Manual entry", "SNOTEL station"], horizontal=True, key="sz_swe_src")
+        if swe_src == "Manual entry":
+            m_swe = st.number_input(f"Slab SWE ({swe_unit})", value=30.0 if not use_imperial else 1.2,
+                                    min_value=0.0, step=1.0 if not use_imperial else 0.1, key="sz_swe_manual")
+            swe_mm = m_swe * (25.4 if use_imperial else 1.0)
+            station_name = "Manual"
+        else:
+            sel = st.selectbox("SNOTEL Station (Slab)", station_options, key="sz_snotel_sel")
+            w_date = st.date_input("Weak layer / start of slab accumulation", value=date(2024, 12, 1), key="sz_weak")
+            r_date = st.date_input("Release date", value=date.today(), key="sz_release")
+            adj = st.slider("Local adjustment to SWE (%)", -50, 50, 0, key="sz_swe_adj")
+            if sel and stations_df is not None and "ID" in stations_df.columns:
+                try:
+                    row = stations_df[stations_df["display_name"] == sel].iloc[0]
+                    triplet = f"{row['ID']}:{row['state']}:SNTL"
+                    data = snotel.get_slab_swe(triplet, str(w_date), str(r_date))
+                    base = data.get("slab_swe_mm", 0) if isinstance(data, dict) else 0
+                    swe_mm = base * (1 + adj / 100.0)
+                    station_name = sel.split(" - ")[0] if " - " in sel else sel
+                except Exception as ex:
+                    st.warning(f"SNOTEL fetch issue: {ex}")
+                    swe_mm = 0
+                    station_name = sel
             else:
-                # Dimensions + Hardness/Grain
-                entr_density = calcs.get_density_from_hardness_grain(entr_hardness, entr_grain)
-                entr_swe_mm = entr_density * entr_depth * conv_length * 1000
-            
-            entrainment_mass = entr_area_m2 * (entr_swe_mm / 1000.0)
-        
-        total_mass = slab_mass + entrainment_mass
-        
-        # ==================== RSS UNCERTAINTY ====================
-        unc_area_val = st.session_state.get("detailed_area", 15)
-        unc_swe_val = st.session_state.get("detailed_swe", 10)
-        unc_entr_val = st.session_state.get("detailed_entr", 25) if include_entrainment else 0
-        
-        total_rel_unc = (
-            (unc_area_val / 100.0)**2 +
-            (unc_swe_val / 100.0)**2
+                swe_mm = 0
+        # With direct crown depth (Step 1) + SWE we compute mass directly + implied density.
+        # (Hand hardness + grain is only for the "Layer density + grain type" path when no SWE is available.)
+        density = 250.0
+        depth_derived_m = None
+        if swe_mm > 0 and direct_depth_m > 0:
+            # density_kg/m3 = (SWE in mm / depth in m) numerically, since mass/area in t/m2 / depth_m *1000 → kg/m3
+            density = swe_mm / direct_depth_m
+            st.caption(f"Implied slab density (from SWE + direct depth): **{density:.0f} kg/m³**")
+            st.caption(f"Volume uses the direct crown depth: **{direct_depth_m:.2f} m**")
+        else:
+            st.caption("Provide SWE and direct crown depth (from Step 1) to derive slab density.")
+
+    # Density/SWE uncertainty
+    with st.expander("🔧 Uncertainty for Slab Density / SWE (optional)", expanded=False):
+        if dens_mode == "Layer density + grain type":
+            unc_dens = st.slider("Density uncertainty %", 0, 50, 20, key="sz_unc_density")
+            unc_swe_v = 0
+        else:
+            unc_swe_v = st.slider("SWE uncertainty %", 0, 50, 10, key="sz_unc_swe")
+            unc_dens = 0
+
+    # 3. ENTRAINMENT (optional)
+    st.markdown("### 3. Entrainment (optional)")
+    st.caption("Add mass from snow picked up along the avalanche path. Use dimensions + grain type or a SWE value. This is optional and can significantly increase the total mass.")
+    include_entr = st.toggle("Include Entrainment Mass", value=False, key="sz_entr_toggle")
+    entr_method = None
+    if include_entr:
+        st.markdown("**Entrainment Estimation**")
+        entr_method = st.radio("Entrainment method",
+                               ["Dimensions + Hardness/Grain", "SWE-based"],
+                               horizontal=True, key="sz_entr_method")
+        ce1, ce2 = st.columns([1, 1])
+        with ce1:
+            e_w = st.number_input(f"Entrainment Width ({unit_length})", value=120.0 if not use_imperial else 400.0,
+                                  min_value=1.0, step=1.0, key="sz_entr_w")
+            e_l = st.number_input(f"Entrainment Length ({unit_length})", value=250.0 if not use_imperial else 800.0,
+                                  min_value=1.0, step=1.0, key="sz_entr_l")
+            e_a = st.number_input(f"Entrainment Area ({unit_area}) — optional", value=e_w * e_l,
+                                  min_value=10.0, key="sz_entr_a")
+            e_d = st.number_input(f"Entrainment Depth ({unit_length})", value=0.3 if not use_imperial else 1.0,
+                                  min_value=0.05, step=0.05, key="sz_entr_d")
+        with ce2:
+            if entr_method == "Dimensions + Hardness/Grain":
+                e_h = st.selectbox("Entrainment Hardness", hardness_options, index=1, key="sz_entr_h")
+                e_g = st.selectbox("Entrainment Grain Type", grain_options, index=0, key="sz_entr_g")
+                e_swe = None
+            else:
+                e_h = None
+                e_g = None
+                e_swe = st.number_input(f"Entrainment SWE ({swe_unit}) — optional", value=40.0 if not use_imperial else 1.5,
+                                        min_value=0.0, step=1.0, key="sz_entr_swe")
+        with st.expander("🔧 Uncertainty for Entrainment (optional)", expanded=False):
+            ca, cb = st.columns(2)
+            with ca:
+                u_ea = st.slider("Entrainment area uncertainty %", 0, 50, 15, key="sz_unc_entr_a")
+                u_ed = st.slider("Entrainment depth uncertainty %", 0, 50, 15, key="sz_unc_entr_d")
+            with cb:
+                u_e = st.slider("Entrainment density/SWE uncertainty %", 0, 50, 25, key="sz_unc_entr")
+    else:
+        u_ea = u_ed = u_e = 0
+        e_w = e_l = e_a = e_d = 0
+        e_h = e_g = e_swe = None
+
+    if st.button("Calculate Start Zone Estimate", type="primary", use_container_width=True, key="sz_calc_btn"):
+        # Geometry
+        area_m2 = area_display * conv_area
+        # Use the direct crown depth from Step 1.
+        # (In SWE mode we also derive implied density = SWE / depth; grain-based derivation is not used.)
+        crown_depth_m = direct_depth_m
+        depth_note = "direct field estimate"
+        vol_m3 = area_m2 * crown_depth_m
+
+        # Mass
+        if use_swe_for_mass:
+            slab_m = area_m2 * (swe_mm / 1000.0)
+            dens_for_store = density  # the derivation one
+        else:
+            slab_m = vol_m3 * density / 1000.0
+            dens_for_store = density
+
+        # Entrainment
+        entr_res = {"entrainment_mass": 0.0, "entr_swe_mm": 0.0, "entr_area_m2": 0.0, "source": ""}
+        if include_entr:
+            entr_res = calcs.calculate_entrainment(
+                entr_area_display = st.session_state.get("sz_entr_a", e_a),
+                entr_depth_display = st.session_state.get("sz_entr_d", e_d),
+                method = st.session_state.get("sz_entr_method", entr_method or ""),
+                manual_swe_display = st.session_state.get("sz_entr_swe", e_swe),
+                hardness = st.session_state.get("sz_entr_h", e_h),
+                grain = st.session_state.get("sz_entr_g", e_g),
+                use_imperial=use_imperial,
+                conv_length=conv_length,
+                conv_area=conv_area,
+            )
+        entr_m = entr_res.get("entrainment_mass", 0.0)
+        total_m = slab_m + entr_m
+
+        # RSS unc - only relevant
+        ua = st.session_state.get("sz_unc_area", 15)
+        ud = st.session_state.get("sz_unc_depth", 15)
+        rel = (ua / 100.0)**2 + (ud / 100.0)**2
+        udens = st.session_state.get("sz_unc_density", 20) if not use_swe_for_mass else 0
+        uswe = st.session_state.get("sz_unc_swe", 10) if use_swe_for_mass else 0
+        if udens: rel += (udens/100.0)**2
+        if uswe: rel += (uswe/100.0)**2
+        if include_entr:
+            rel += (st.session_state.get("sz_unc_entr_a", 15)/100.0)**2
+            rel += (st.session_state.get("sz_unc_entr_d", 15)/100.0)**2
+            rel += (st.session_state.get("sz_unc_entr", 25)/100.0)**2
+        rel = rel ** 0.5
+        lo_m = total_m / (1 + rel)
+        hi_m = total_m * (1 + rel)
+
+        mid_label, lo_label, hi_label = calcs.get_uncertainty_mass_range(
+            total_m, ua, ud, udens or 0, uswe or 0
         )
-        if include_entrainment:
-            total_rel_unc += (unc_entr_val / 100.0)**2
-        total_rel_unc = total_rel_unc ** 0.5
-        
-        f = 1 + total_rel_unc
-        low_mass = total_mass / f
-        high_mass = total_mass * f
-        
-        mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
-            total_mass, unc_area_val, 0, 0, unc_swe_val
-        )
-        
-        st.success(f"**Estimated D-Size: {mid_d}** (uncertainty range: **{low_d} – {high_d}**)")
-        
-        st.info(f"**Slab Mass**: {slab_mass:,.0f} t | **Entrained Mass**: {entrainment_mass:,.0f} t | "
-                f"**Total Mass**: {total_mass:,.0f} tonnes")
-        
-        st.caption(f"Uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**")
-        st.caption(calcs.get_dsize_range_string(total_mass))
-        
-        # Store for database
-        st.session_state.detailed_inputs = {
-            "method": "Detailed",
-            "area_m2": slab_area_m2,
-            "volume_m3": slab_area_m2 * (burial_depth_ref * conv_length),
-            "mass_tonnes": slab_mass,
-            "entrainment_mass": entrainment_mass,
-            "total_mass": total_mass,
-            "calculated_d_size": mid_d,
-            "unc_low": low_d,
-            "unc_high": high_d,
-            "low_mass": low_mass,
-            "high_mass": high_mass,
-            "weak_layer_date": str(weak_date),
-            "release_date": str(release_date),
+
+        st.success(f"**Estimated D-Size: {mid_label}** (uncertainty range: **{lo_label} – {hi_label}**)")
+        st.info(f"**Slab Mass**: {slab_m:,.0f} t | **Entrained Mass**: {entr_m:,.0f} t | **Total Mass**: {total_m:,.0f} t ({lo_m:,.0f} – {hi_m:,.0f} t)")
+
+        if dens_mode == "SWE based density estimate":
+            st.caption(f"Crown depth used: **{crown_depth_m:.2f} m** (direct) | Implied density from SWE: **{density:.0f} kg/m³**")
+        else:
+            st.caption(f"Crown depth used for volume: **{crown_depth_m:.2f} m** ({depth_note})")
+
+        if include_entr and entr_m > 0:
+            src = entr_res.get("source", "")
+            st.caption(f"Entrainment: {entr_res.get('entr_area_m2',0):,.0f} m² × SWE {entr_res.get('entr_swe_mm',0):,.1f} mm (source: {src})")
+            for n in entr_res.get("notes", []):
+                st.caption(n) if "large" not in n.lower() else st.warning(n)
+
+        # Capture method choices for research database (to distinguish "quick" vs "detailed" approaches)
+        density_profile = st.session_state.get("sz_density_profile") if dens_mode == "Layer density + grain type" else None
+        swe_source = st.session_state.get("sz_swe_src") if dens_mode == "SWE based density estimate" else None
+        entrainment_method_choice = st.session_state.get("sz_entr_method") if include_entr else None
+
+        # Detect if user overrode the area input (polygon vs dimensions)
+        computed_area_display = crown_width * slab_length if 'crown_width' in locals() and 'slab_length' in locals() else None
+        area_overridden = (computed_area_display is not None and abs(area_display - computed_area_display) > 0.1)
+
+        # Save to session for DB
+        st.session_state.start_zone_inputs = {
+            "schema_version": "2.0",
+            "method": "start_zone",
+            "geometry_mode": "dimensions",
+            "density_mode": dens_mode,
+            "density_profile": density_profile,
+            "swe_source": swe_source,
+            "area_overridden": area_overridden,
+            "area_m2": area_m2,
+            "volume_m3": vol_m3,
+            "depth_m": crown_depth_m,
+            "crown_depth_direct_m": direct_depth_m,
+            "crown_depth_derived_m": depth_derived_m,
+            "crown_width_m": crown_width_m,
+            "slab_length_m": slab_length_m,
+            "mass_tonnes": slab_m,
+            "entrainment_mass": entr_m,
+            "total_mass": total_m,
+            "density_kgm3": dens_for_store,
+            "use_layered_density": use_layered,
+            "hardness": hardness,
+            "grain": grain,
+            "slab_swe_mm": swe_mm if use_swe_for_mass else None,
             "snotel_station": station_name,
-            "slab_swe_mm": slab_swe_mm,
-            "adjusted_swe_mm": adjusted_slab_swe_mm,
-            "burial_depth_ref_m": burial_depth_ref * conv_length,
-            "include_entrainment": include_entrainment,
-            "entr_width_m": entr_width if include_entrainment else None,
-            "entr_length_m": entr_length if include_entrainment else None,
-            "entr_area_m2": entr_area * conv_area if include_entrainment else None,
-            "entr_depth_m": entr_depth * conv_length if include_entrainment else None,
-            "entr_hardness": entr_hardness if include_entrainment and entr_method == "Dimensions + Hardness/Grain" else None,
-            "entr_grain": entr_grain if include_entrainment and entr_method == "Dimensions + Hardness/Grain" else None,
-            "entr_swe_mm": entr_swe_mm if include_entrainment else None,
-            "unc_area_pct": unc_area_val,
-            "unc_swe_pct": unc_swe_val,
-            "unc_entrainment_pct": unc_entr_val,
+            "include_entrainment": include_entr,
+            "entrainment_method": entrainment_method_choice,
+            "entr_width_m": e_w * conv_length if include_entr else None,
+            "entr_length_m": e_l * conv_length if include_entr else None,
+            "entr_area_m2": entr_res.get("entr_area_m2"),
+            "entr_depth_m": entr_res.get("entr_depth_m"),
+            "entr_hardness": e_h if include_entr else None,
+            "entr_grain": e_g if include_entr else None,
+            "entr_swe_mm": entr_res.get("entr_swe_mm"),
+            "calculated_d_size": mid_label,
+            "unc_low": lo_label,
+            "unc_high": hi_label,
+            "low_mass": lo_m,
+            "high_mass": hi_m,
+            "dsize_mass_original": mid_label,
+            "dsize_mass_midpoint": mid_label,
+            "dsize_volume_midpoint": calcs.volume_m3_to_dsize(vol_m3)["label"] if vol_m3 > 0 else None,
+            "dsize_method": "mass_midpoint",
+            "unc_area_pct": ua,
+            "unc_depth_pct": ud,
+            "unc_density_pct": udens,
+            "unc_swe_pct": uswe,
+            "unc_entrainment_pct": st.session_state.get("sz_unc_entr", 25) if include_entr else 0,
         }
-        
-        fig = dsize_plot.plot_dsize_with_user_mass(total_mass, low_mass, high_mass)
+        fig = dsize_plot.plot_dsize_with_user_mass(total_m, lo_m, hi_m)
         st.pyplot(fig)
-        
+
+    render_save_section(prefix="start")
+
+
 # ====================== RUNOUT / DEBRIS ESTIMATE ======================
 with tab_runout:
-    st.subheader("Runout / Debris Estimate (Test Version)")
-    st.caption("For when you can only observe the avalanche deposit / runout zone")
+    st.subheader("Runout/Debris Method")
+    st.caption("Volume-focused estimate for the deposit. Debris density is highly variable, so D-size is calculated directly from measured deposit volume using the Jamieson 2024 bins (mass is optional if you provide a custom density).")
+
+    # Reference volume chart (static)
+    with st.expander("📊 View Deposit Volume D-Size Classification Chart (Jamieson 2024)", expanded=False):
+        st.image(
+            "dsize_volume_reference.png",
+            caption="Avalanche Destructive Size (D-Size) Classification — Deposit Volume Ranges and Typical Values (Log Scale)",
+            use_container_width=False,
+            width=900
+        )
+
+    st.caption("Measure or estimate the deposit length, width, and average thickness. Volume is the primary input for D-size.")
 
     col1, col2 = st.columns([1, 1])
     
     with col1:
         deposit_length = st.number_input(f"Deposit Length (along path) ({unit_length})", 
                                          value=400.0 if use_imperial else 120.0, 
-                                         min_value=10.0, step=1.0)
+                                         min_value=10.0, max_value=5000.0 if not use_imperial else 15000.0, step=1.0, key="runout_length")
         deposit_width = st.number_input(f"Deposit Width ({unit_length})", 
                                         value=150.0 if use_imperial else 45.0, 
-                                        min_value=10.0, step=1.0)
-        avg_thickness = st.number_input(f"Average Deposit Thickness ({unit_length})", 
-                                        value=1.5 if use_imperial else 0.5, 
-                                        min_value=0.1, step=0.05)
+                                        min_value=10.0, max_value=3000.0 if not use_imperial else 10000.0, step=1.0, key="runout_width")
         
+        # Provide custom density moved to bottom of column 1
+        use_custom_density = st.toggle(
+            "Provide custom debris density for optional mass reference",
+            value=False,
+            help="Disable for pure volume-based estimate (recommended). Enable to manually enter a density for mass reference only.",
+            key="runout_custom_density"
+        )
+        
+        density = 500
+        if use_custom_density:
+            density = st.number_input(
+                "Custom Deposit Density (kg/m³)",
+                value=500,
+                min_value=100,
+                max_value=1200,
+                step=10,
+                help="Optional. Used only to show a mass reference. D-size and main estimate are always volume-based.",
+                key="runout_density"
+            )
+    
+    with col2:
+        # Deposit area at top of column 2
         area_runout = st.number_input(
             f"Deposit Area ({unit_area}) — optional",
             value=deposit_length * deposit_width,
             min_value=50.0,
-            help="Auto-calculated from Length × Width. Override if you have a polygon measurement."
-        )
-    
-    with col2:
-        debris_type = st.selectbox(
-            "Deposit / Debris Type",
-            ["Dry", "Moist", "Wet", "Hard Slab Debris", "Soft Slab Debris"],
-            index=2
+            help="Auto-calculated from Length × Width. Override if you have a polygon measurement.",
+            key="runout_area"
         )
         
-        density_defaults = {
-            "Dry": 400,
-            "Moist": 500,
-            "Wet": 600,
-            "Hard Slab Debris": 480,
-            "Soft Slab Debris": 380
-        }
-        
-        density = st.number_input("Deposit Density (kg/m³)", 
-                                  value=density_defaults[debris_type], 
-                                  min_value=200, step=10,
-                                  help="Typical values based on field observations and literature")
-        
-        overall_unc = st.slider("Overall Uncertainty %", 5, 50, 20)
+        # Average deposit thickness below area in column 2
+        avg_thickness = st.number_input(f"Average Deposit Thickness ({unit_length})", 
+                                        value=1.5 if use_imperial else 0.5, 
+                                        min_value=0.1, max_value=30.0 if not use_imperial else 100.0, step=0.05, key="runout_thickness")
     
-    if st.button("Calculate Runout / Debris Estimate", type="primary", use_container_width=True):
+    # Advanced uncertainty moved underneath, full width of both columns (same as other modules)
+    with st.expander("🔧 Advanced Uncertainty (per input) — RSS Method", expanded=False):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            unc_area = st.slider("Deposit Area (length × width) uncertainty %", 0, 50, 15, key="runout_unc_area")
+            unc_depth = st.slider("Deposit Depth / Thickness uncertainty %", 0, 50, 15, key="runout_unc_depth")
+    
+    if st.button("Calculate Runout/Debris Method", type="primary", use_container_width=True, key="calculate_runout"):
         length_m = deposit_length * conv_length
         width_m = deposit_width * conv_length
         thickness_m = avg_thickness * conv_length
         area_m2 = area_runout * conv_area
         
         volume_m3 = area_m2 * thickness_m
-        mass_tonnes = volume_m3 * density / 1000.0
+
+        # === VOLUME-BASED D-SIZE (using Jamieson 2024 bins) - always ===
+        vol_d = calcs.volume_m3_to_dsize(volume_m3)
+        mid_d = vol_d["label"]
+
+        # Advanced uncertainty using RSS (same as start zone modules)
+        unc_area_val = st.session_state.get("runout_area", 15)
+        unc_depth_val = st.session_state.get("runout_depth", 15)
+        total_rel_unc = (
+            (unc_area_val / 100.0)**2 +
+            (unc_depth_val / 100.0)**2
+        ) ** 0.5
+        vol_factor = 1 + total_rel_unc
+        vol_low = max(0.0, volume_m3 / vol_factor)
+        vol_high = volume_m3 * vol_factor
+        low_d = calcs.volume_m3_to_dsize(vol_low)["label"]
+        high_d = calcs.volume_m3_to_dsize(vol_high)["label"]
+
+        st.success(f"**Estimated D-Size (from volume): {mid_d}** (uncertainty range: **{low_d} – {high_d}**)")
         
-        # Simple uncertainty
-        f = 1 + overall_unc / 100.0
-        low_mass = mass_tonnes / f
-        high_mass = mass_tonnes * f
+        st.info(f"**Deposit Volume**: {volume_m3:,.0f} m³ ({vol_low:,.0f} – {vol_high:,.0f} m³)")
+
+        if use_custom_density:
+            # Optional mass reference only if user provided custom density
+            vol_res = calcs.estimate_mass_from_volume(volume_m3, nominal_density=density)
+            mass_nom = vol_res["mass_tonnes_nominal"]
+            # Use the volume uncertainty (RSS from area + depth) for the mass range
+            mass_low = vol_low * (density / 1000.0)
+            mass_high = vol_high * (density / 1000.0)
+            st.info(
+                f"**Est. Mass (using your custom density {density} kg/m³)**: {mass_nom:,.0f} t "
+                f"({mass_low:,.0f} – {mass_high:,.0f} t)"
+            )
+        else:
+            mass_nom = 0.0
+            mass_low = 0.0
+            mass_high = 0.0
         
-        mid_d, low_d, high_d = calcs.get_uncertainty_mass_range(
-            mass_tonnes, overall_unc, overall_unc, overall_unc
-        )
+        # Removed redundant st.caption — D-size range is already shown in the green success line above
         
-        st.success(f"**Estimated D-Size: {mid_d}** (uncertainty range: **{low_d} – {high_d}**)")
-        
-        st.info(f"**Deposit Volume**: {volume_m3:,.0f} m³  |  **Estimated Mass**: {mass_tonnes:,.0f} tonnes")
-        st.info(f"Uncertainty range: **{low_mass:,.0f} – {high_mass:,.0f} tonnes**")
-        
-        st.caption(calcs.get_dsize_range_string(mass_tonnes))
-        
-        # Store for database
-        st.session_state.runout_inputs = {
-            "method": "Runout/Debris",
+        # Store — volume is the basis for D-size. Mass only if custom density used.
+        runout_store = {
+            "schema_version": "2.0",
+            "method": "runout_debris",
             "area_m2": area_m2,
             "volume_m3": volume_m3,
-            "mass_tonnes": mass_tonnes,
             "entrainment_mass": 0,
-            "total_mass": mass_tonnes,
             "calculated_d_size": mid_d,
             "unc_low": low_d,
             "unc_high": high_d,
-            "low_mass": low_mass,
-            "high_mass": high_mass,
-            "density_kgm3": density,
-            "debris_type": debris_type,
-            "unc_runout_pct": overall_unc
+            "unc_area_pct": unc_area_val,
+            "unc_depth_pct": unc_depth_val,
+            "unc_runout_pct": round(total_rel_unc * 100, 1),  # combined RSS for backward compat
+            "volume_focused": True,
+            "volume_d_size": mid_d,
+            "dsize_method": "volume_midpoint",
+            "dsize_mass_original": None,
+            "dsize_mass_midpoint": mass_nom if mass_nom > 0 else None,  # computed even for runout if mass was estimated
+            "dsize_volume_midpoint": mid_d,
         }
+        if use_custom_density:
+            runout_store.update({
+                "mass_tonnes": mass_nom,
+                "mass_tonnes_low": mass_low,
+                "mass_tonnes_high": mass_high,
+                "total_mass": mass_nom,
+                "density_kgm3": density,
+            })
+        else:
+            runout_store.update({
+                "mass_tonnes": 0,
+                "mass_tonnes_low": 0,
+                "mass_tonnes_high": 0,
+                "total_mass": 0,
+            })
         
-        fig = dsize_plot.plot_dsize_with_user_mass(mass_tonnes, low_mass, high_mass)
+        st.session_state.runout_inputs = runout_store
+        
+        # Plot the volume-based D-Size with user's volume + uncertainty bands (no mass needed)
+        fig = dsize_plot.plot_dsize_volume_with_user_value(volume_m3, vol_low, vol_high)
         st.pyplot(fig)
-            
-# ====================== SAVE BUTTON ======================
-st.divider()
-st.subheader("💾 Save to Research Database")
-
-observer = st.text_input("Observer Name", value="Your Name")
-location = st.text_input("Avalanche Location", placeholder="e.g. Chugach Mtns, AK — crown visible from highway")
-field_d_size_options = ["D1", "D1.5", "D2", "D2.5", "D3", "D3.5", "D4", "D4.5", "D5"]
-field_assessed_d_size = st.selectbox("Field-Assessed D-Size (what you think it actually was)", field_d_size_options)
-notes = st.text_area("Notes", placeholder="Optional observation notes, photos description, weather, etc.", height=100)
-
-# === SMART SAVE LOGIC - Supports Quick, Detailed, and Runout ===
-quick_data = st.session_state.get("quick_inputs")
-detailed_data = st.session_state.get("detailed_inputs")
-runout_data = st.session_state.get("runout_inputs")
-
-if quick_data or detailed_data or runout_data:
-    options = []
-    if quick_data:
-        options.append(("Quick Method", quick_data))
-    if detailed_data:
-        options.append(("Detailed SNOTEL Method", detailed_data))
-    if runout_data:
-        options.append(("Runout / Debris Estimate", runout_data))
-    
-    if len(options) > 1:
-        save_choice = st.radio(
-            "Which calculation do you want to save?",
-            [name for name, _ in options],
-            horizontal=True
-        )
-        selected_data = next(data for name, data in options if name == save_choice)
-    else:
-        selected_data = options[0][1] if options else None
-else:
-    selected_data = None
-
-if st.button("💾 Save Avalanche to Research Database", type="primary", use_container_width=True):
-    if selected_data:
-        data = {
-            "timestamp": pd.Timestamp.now().isoformat(),
-            "observer": observer,
-            "location": location,
-            "method": selected_data.get("method"),
-            "area_m2": selected_data.get("area_m2"),
-            "volume_m3": selected_data.get("volume_m3"),
-            "mass_tonnes": selected_data.get("mass_tonnes"),
-            "entrainment_mass": selected_data.get("entrainment_mass"),
-            "total_mass": selected_data.get("total_mass") or selected_data.get("mass_tonnes"),
-            "calculated_d_size": selected_data.get("calculated_d_size"),
-            "unc_low": selected_data.get("unc_low"),
-            "unc_high": selected_data.get("unc_high"),
-            "field_assessed_d_size": field_assessed_d_size,
-            
-            # Slab / Quick fields
-            "crown_width_m": selected_data.get("crown_width_m"),
-            "slab_length_m": selected_data.get("slab_length_m"),
-            "depth_m": selected_data.get("depth_m"),
-            "hardness": selected_data.get("hardness"),
-            "grain": selected_data.get("grain"),
-            "density_kgm3": selected_data.get("density_kgm3"),
-            "use_layered_density": selected_data.get("use_layered_density"),
-            
-            # Detailed fields
-            "weak_layer_date": selected_data.get("weak_layer_date"),
-            "release_date": selected_data.get("release_date"),
-            "snotel_station": selected_data.get("snotel_station"),
-            "slab_swe_mm": selected_data.get("slab_swe_mm"),
-            "adjusted_swe_mm": selected_data.get("adjusted_swe_mm"),
-            "burial_depth_ref_m": selected_data.get("burial_depth_ref_m"),
-            
-            # Entrainment fields
-            "include_entrainment": selected_data.get("include_entrainment"),
-            "entr_width_m": selected_data.get("entr_width_m"),
-            "entr_length_m": selected_data.get("entr_length_m"),
-            "entr_area_m2": selected_data.get("entr_area_m2"),
-            "entr_depth_m": selected_data.get("entr_depth_m"),
-            "entr_hardness": selected_data.get("entr_hardness"),
-            "entr_grain": selected_data.get("entr_grain"),
-            "entr_swe_mm": selected_data.get("entr_swe_mm"),
-            
-            # Runout/Debris specific
-            "debris_type": selected_data.get("debris_type"),
-            
-            # Uncertainty values (trying multiple possible keys)
-            "unc_lw_pct": selected_data.get("unc_lw") or selected_data.get("unc_lw_pct"),
-            "unc_depth_pct": selected_data.get("unc_depth") or selected_data.get("unc_depth_pct"),
-            "unc_density_pct": selected_data.get("unc_density") or selected_data.get("unc_density_pct"),
-            "unc_area_pct": selected_data.get("unc_area") or selected_data.get("unc_area_pct"),
-            "unc_swe_pct": selected_data.get("unc_swe") or selected_data.get("unc_swe_pct"),
-            "unc_runout_pct": selected_data.get("unc_runout") or selected_data.get("unc_runout_pct"),
-            "unc_entrainment_pct": selected_data.get("unc_entr") or selected_data.get("unc_entrainment") or selected_data.get("unc_entrainment_pct"),
-            
-            "notes": notes,
-        }
         
-        db.save_avalanche(data)
-        st.success(f"✅ {selected_data.get('method')} saved successfully!")
-        
-        # Clear all session states
-        for key in ["quick_inputs", "detailed_inputs", "runout_inputs"]:
-            st.session_state.pop(key, None)
-    else:
-        st.warning("Calculate at least one method before saving.")
-        
+        if use_custom_density:
+            st.caption(f"D-Size from volume only. Optional mass reference shown using your custom density of {density} kg/m³.")
+        else:
+            st.caption("D-Size and estimate based purely on deposit volume (no density used).")
+            
+    render_save_section(prefix="runout")
+
+
 # ====================== VIEW LOG TAB ======================
 with tab_log:
     st.subheader("📋 Research Database — Saved Avalanches")
@@ -667,12 +731,23 @@ with tab_log:
     if log_df.empty:
         st.info("No avalanches saved yet. Calculate and save some entries to build the database!")
     else:
+        # Show migration status
+        if 'dsize_method' in log_df.columns:
+            unmigrated = log_df[log_df['dsize_method'].isna() | (log_df['dsize_method'] == '')].shape[0]
+            if unmigrated > 0:
+                st.info(f"{unmigrated} records have not been migrated yet to the midpoint columns. Run 'Calculate' + Save on old entries or restart the app to trigger migration.")
+        st.caption("V2 records (schema_version='2.0') use the consistent naming scheme. The table and CSV list columns in the clean V2-preferred order. Legacy columns from earlier versions are preserved for historical data.")
         preferred_order = [
-            "timestamp", "observer", "location", "method",
-            "calculated_d_size", "field_assessed_d_size",
+            "timestamp", "observer", "location", "report_link", "schema_version", "method",
+            "geometry_mode", "density_mode", "density_profile", "swe_source",
+            "area_overridden", "entrainment_method_choice", "entrainment_method",
+            "calculated_d_size", "dsize_method",
+            "dsize_mass_original", "dsize_mass_midpoint", "dsize_volume_midpoint",
+            "field_assessed_d_size",
             "total_mass", "mass_tonnes", "entrainment_mass",
             "area_m2", "volume_m3",
             "crown_width_m", "slab_length_m", "depth_m",
+            "crown_depth_direct_m", "crown_depth_derived_m",
             "hardness", "grain", "density_kgm3", "debris_type",
             "use_layered_density", "include_entrainment",
             "entr_width_m", "entr_length_m", "entr_area_m2", "entr_depth_m",
@@ -686,9 +761,43 @@ with tab_log:
        
         available_cols = [col for col in preferred_order if col in log_df.columns]
         display_df = log_df[available_cols].copy()
+
+        # The three explicit D-size columns are now stored.
+        # We keep a simple fallback column for very old records.
+        try:
+            def get_fallback(row):
+                mass = row.get("mass_tonnes") or row.get("total_mass")
+                vol = row.get("volume_m3")
+                if pd.notna(vol) and vol > 0:
+                    return calcs.volume_m3_to_dsize(vol)["label"]
+                return calcs.get_current_mass_dsize(mass)
+            display_df["dsize_fallback"] = display_df.apply(get_fallback, axis=1)
+        except Exception:
+            pass  # fail gracefully
        
         if "timestamp" in display_df.columns:
             display_df["timestamp"] = pd.to_datetime(display_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+
+        # Rename columns ONLY for display and CSV export.
+        # This presents a clean, consistent naming scheme on the site and downloads
+        # without touching the underlying database (old data and column names are preserved).
+        display_rename = {
+            "unc_lw_pct": "unc_slab_lw_pct",
+            "unc_area_pct": "unc_slab_area_pct",
+            "unc_depth_pct": "unc_slab_depth_pct",
+            "unc_density_pct": "unc_slab_density_pct",
+            "unc_swe_pct": "unc_slab_swe_pct",
+            "density_kgm3": "slab_density_kg_m3",
+            "unc_low": "dsize_unc_low",
+            "unc_high": "dsize_unc_high",
+            "calculated_d_size": "dsize_calculated",
+            "area_m2": "slab_area_m2",
+            "volume_m3": "slab_volume_m3",
+            "mass_tonnes": "slab_mass_t",
+            "total_mass": "total_mass_t",
+            "entrainment_mass": "entrainment_mass_t",
+        }
+        display_df = display_df.rename(columns=display_rename)
        
         st.dataframe(
             display_df,
@@ -696,27 +805,75 @@ with tab_log:
             hide_index=True,
             column_config={
                 "timestamp": st.column_config.TextColumn("Date/Time"),
-                "total_mass": st.column_config.NumberColumn("Total Mass (t)", format="%.0f"),
-                "mass_tonnes": st.column_config.NumberColumn("Slab Mass (t)", format="%.0f"),
-                "entrainment_mass": st.column_config.NumberColumn("Entrained Mass (t)", format="%.0f"),
-                "volume_m3": st.column_config.NumberColumn("Volume (m³)", format="%.0f"),
-                "density_kgm3": st.column_config.NumberColumn("Density (kg/m³)", format="%.0f"),
-                "unc_lw_pct": st.column_config.NumberColumn("Unc. LW %", format="%.1f"),
-                "unc_entrainment_pct": st.column_config.NumberColumn("Unc. Entr. %", format="%.1f"),
+                "report_link": st.column_config.LinkColumn("Avalanche Report", display_text="🔗 Open Report"),
+                "schema_version": st.column_config.TextColumn("Schema Version"),
+                "method": st.column_config.TextColumn("Method"),
+                "geometry_mode": st.column_config.TextColumn("Geometry Mode"),
+                "density_mode": st.column_config.TextColumn("Density Mode"),
+                "density_profile": st.column_config.TextColumn("Density Profile"),
+                "swe_source": st.column_config.TextColumn("SWE Source"),
+                "area_overridden": st.column_config.TextColumn("Area Overridden?"),
+                "entrainment_method_choice": st.column_config.TextColumn("Entrainment Method Choice"),
+                "entrainment_method": st.column_config.TextColumn("Entrainment Method"),
+                "dsize_calculated": st.column_config.TextColumn("D-size (calculated)"),
+                "dsize_method": st.column_config.TextColumn("D-size Method"),
+                "dsize_mass_original": st.column_config.TextColumn("D-size Mass (original)"),
+                "dsize_mass_midpoint": st.column_config.TextColumn("D-size Mass (midpoint)"),
+                "dsize_volume_midpoint": st.column_config.TextColumn("D-size Volume (midpoint)"),
+                "field_assessed_d_size": st.column_config.TextColumn("Field-Assessed D-Size"),
+                "total_mass_t": st.column_config.NumberColumn("Total Mass (t)", format="%.0f"),
+                "slab_mass_t": st.column_config.NumberColumn("Slab Mass (t)", format="%.0f"),
+                "entrainment_mass_t": st.column_config.NumberColumn("Entrained Mass (t)", format="%.0f"),
+                "slab_area_m2": st.column_config.NumberColumn("Slab Area (m²)", format="%.0f"),
+                "slab_volume_m3": st.column_config.NumberColumn("Slab Volume (m³)", format="%.0f"),
+                "crown_width_m": st.column_config.NumberColumn("Crown Width (m)", format="%.0f"),
+                "slab_length_m": st.column_config.NumberColumn("Slab Length (m)", format="%.0f"),
+                "slab_depth_m": st.column_config.NumberColumn("Slab Depth (m)", format="%.2f"),
+                "crown_depth_direct_m": st.column_config.NumberColumn("Crown Depth Direct (m)", format="%.2f"),
+                "crown_depth_derived_m": st.column_config.NumberColumn("Crown Depth Derived (m)", format="%.2f"),
+                "hardness": st.column_config.TextColumn("Hardness"),
+                "grain": st.column_config.TextColumn("Grain Type"),
+                "slab_density_kg_m3": st.column_config.NumberColumn("Slab Density (kg/m³)", format="%.0f"),
+                "debris_type": st.column_config.TextColumn("Debris Type"),
+                "use_layered_density": st.column_config.TextColumn("Use Layered Density"),
+                "include_entrainment": st.column_config.TextColumn("Include Entrainment"),
+                "entr_width_m": st.column_config.NumberColumn("Entrainment Width (m)", format="%.0f"),
+                "entr_length_m": st.column_config.NumberColumn("Entrainment Length (m)", format="%.0f"),
+                "entr_area_m2": st.column_config.NumberColumn("Entrainment Area (m²)", format="%.0f"),
+                "entr_depth_m": st.column_config.NumberColumn("Entrainment Depth (m)", format="%.2f"),
+                "entr_hardness": st.column_config.TextColumn("Entrainment Hardness"),
+                "entr_grain": st.column_config.TextColumn("Entrainment Grain"),
+                "entr_swe_mm": st.column_config.NumberColumn("Entrainment SWE (mm)", format="%.1f"),
+                "snotel_station": st.column_config.TextColumn("SNOTEL Station"),
+                "weak_layer_date": st.column_config.TextColumn("Weak Layer Date"),
+                "release_date": st.column_config.TextColumn("Release Date"),
+                "slab_swe_mm": st.column_config.NumberColumn("Slab SWE (mm)", format="%.1f"),
+                "adjusted_swe_mm": st.column_config.NumberColumn("Adjusted SWE (mm)", format="%.1f"),
+                "unc_slab_lw_pct": st.column_config.NumberColumn("Unc. Slab LW %", format="%.1f"),
+                "unc_slab_area_pct": st.column_config.NumberColumn("Unc. Slab Area %", format="%.1f"),
+                "unc_slab_depth_pct": st.column_config.NumberColumn("Unc. Slab Depth %", format="%.1f"),
+                "unc_slab_density_pct": st.column_config.NumberColumn("Unc. Slab Density %", format="%.1f"),
+                "unc_slab_swe_pct": st.column_config.NumberColumn("Unc. Slab SWE %", format="%.1f"),
+                "unc_entrainment_pct": st.column_config.NumberColumn("Unc. Entrainment %", format="%.1f"),
                 "unc_runout_pct": st.column_config.NumberColumn("Unc. Runout %", format="%.1f"),
+                "dsize_unc_low": st.column_config.TextColumn("D-size Uncertainty Low"),
+                "dsize_unc_high": st.column_config.TextColumn("D-size Uncertainty High"),
+                "notes": st.column_config.TextColumn("Notes"),
+                "dsize_fallback": st.column_config.TextColumn("D-size (fallback)"),
             }
         )
        
         st.download_button(
-            label="📥 Download Full Research Database as CSV",
-            data=log_df.to_csv(index=False).encode(),
+            label="📥 Download Research Database as CSV (using clean column order)",
+            data=display_df.to_csv(index=False).encode(),
             file_name="avalanche_research_log.csv",
             mime="text/csv"
         )
+        st.caption("Columns shown and exported use clean, consistent names for V2 (and mapped legacy). The actual database columns are unchanged to preserve all historical data.")
        
         st.caption(f"Total records in database: **{len(log_df)}**")
 
 # ====================== FOOTER ======================
 st.divider()
-st.caption("💡 Quick method uses Kim & Jamieson (2014) Table 3 densities. Detailed method reuses your Storm Tracker SNOTEL code.")
-st.caption("Uncertainty sliders let you reflect real field data quality. Toggle Imperial units above for U.S. field use.")
+st.caption("💡 V2.0: Single unified Start Zone method (dimensions + optional area override) + density (grain/hardness simple or layers, or SWE). Runout is volume-first. See schema_version='2.0' in DB.")
+st.caption("Uncertainty sliders (per-section) use RSS for relevant params only. Toggle Imperial units above for U.S. field use.")

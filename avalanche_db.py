@@ -3,6 +3,8 @@ import psycopg2
 import sqlite3
 import pandas as pd
 
+import avalanche_calcs as calcs  # for new D-size calculations during migration
+
 USE_SUPABASE = bool(os.getenv("DB_HOST"))
 
 if USE_SUPABASE:
@@ -39,6 +41,11 @@ def init_db():
                 entrainment_mass REAL,
                 total_mass REAL,
                 calculated_d_size TEXT,
+                original_calculated_d_size TEXT,
+                dsize_method TEXT,
+                dsize_mass_original TEXT,
+                dsize_mass_midpoint TEXT,
+                dsize_volume_midpoint TEXT,
                 unc_low TEXT,
                 unc_high TEXT,
                 field_assessed_d_size TEXT,
@@ -70,7 +77,18 @@ def init_db():
                 unc_area_pct REAL,
                 unc_swe_pct REAL,
                 unc_entrainment_pct REAL,
-                notes TEXT
+                notes TEXT,
+                report_link TEXT,
+                crown_depth_direct_m REAL,
+                crown_depth_derived_m REAL,
+                geometry_mode TEXT,
+                density_mode TEXT,
+                density_profile TEXT,
+                swe_source TEXT,
+                entrainment_method_choice TEXT,
+                area_overridden INTEGER,
+                schema_version TEXT,
+                entrainment_method TEXT
             )
         """)
     else:
@@ -87,6 +105,11 @@ def init_db():
                 entrainment_mass REAL,
                 total_mass REAL,
                 calculated_d_size TEXT,
+                original_calculated_d_size TEXT,
+                dsize_method TEXT,
+                dsize_mass_original TEXT,
+                dsize_mass_midpoint TEXT,
+                dsize_volume_midpoint TEXT,
                 unc_low TEXT,
                 unc_high TEXT,
                 field_assessed_d_size TEXT,
@@ -118,7 +141,18 @@ def init_db():
                 unc_area_pct REAL,
                 unc_swe_pct REAL,
                 unc_entrainment_pct REAL,
-                notes TEXT
+                notes TEXT,
+                report_link TEXT,
+                crown_depth_direct_m REAL,
+                crown_depth_derived_m REAL,
+                geometry_mode TEXT,
+                density_mode TEXT,
+                density_profile TEXT,
+                swe_source TEXT,
+                entrainment_method_choice TEXT,
+                area_overridden INTEGER,
+                schema_version TEXT,
+                entrainment_method TEXT
             )
         """)
     
@@ -143,7 +177,23 @@ def init_db():
         ("unc_area_pct", "REAL"),
         ("unc_swe_pct", "REAL"),
         ("unc_entrainment_pct", "REAL"),
-        ("unc_runout_pct", "REAL")
+        ("unc_runout_pct", "REAL"),
+        ("original_calculated_d_size", "TEXT"),
+        ("dsize_method", "TEXT"),
+        ("report_link", "TEXT"),
+        ("dsize_mass_original", "TEXT"),
+        ("dsize_mass_midpoint", "TEXT"),
+        ("dsize_volume_midpoint", "TEXT"),
+        ("crown_depth_direct_m", "REAL"),
+        ("crown_depth_derived_m", "REAL"),
+        ("geometry_mode", "TEXT"),
+        ("density_mode", "TEXT"),
+        ("density_profile", "TEXT"),
+        ("swe_source", "TEXT"),
+        ("entrainment_method_choice", "TEXT"),
+        ("area_overridden", "INTEGER"),
+        ("schema_version", "TEXT"),
+        ("entrainment_method", "TEXT"),
     ]
     
     for col_name, col_type in new_columns:
@@ -158,6 +208,9 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+
+    # Run D-size binning migration (idempotent, logs if changes made)
+    migrate_dsize_calculations()
 
 def save_avalanche(data: dict):
     init_db()
@@ -179,3 +232,135 @@ def load_avalanche_log() -> pd.DataFrame:
     df = pd.read_sql("SELECT * FROM avalanches ORDER BY timestamp DESC", conn)
     conn.close()
     return df
+
+
+def migrate_dsize_calculations():
+    """Recalculate and store the three D-size views for all records.
+
+    New columns (added if missing):
+      - dsize_mass_original   : historical value that was originally stored
+      - dsize_mass_midpoint   : always recalculated with current mass midpoint bins
+      - dsize_volume_midpoint : recalculated with current volume midpoint bins (if volume > 0)
+
+    We also:
+      - Backfill report_link by extracting any URL from the notes field
+      - Set calculated_d_size + dsize_method to the recommended current value
+        (mass_midpoint for Quick/Detailed, volume_midpoint for Runout)
+    """
+    import re
+    url_pattern = re.compile(r'https?://[^\s<>"\)\]]+')
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+
+        # Ensure the columns exist
+        for col, typ in [
+            ("dsize_mass_original", "TEXT"),
+            ("dsize_mass_midpoint", "TEXT"),
+            ("dsize_volume_midpoint", "TEXT"),
+            ("report_link", "TEXT"),
+            ("dsize_method", "TEXT"),
+            ("crown_depth_direct_m", "REAL"),
+            ("crown_depth_derived_m", "REAL"),
+            ("geometry_mode", "TEXT"),
+            ("density_mode", "TEXT"),
+            ("density_profile", "TEXT"),
+            ("swe_source", "TEXT"),
+            ("entrainment_method_choice", "TEXT"),
+            ("area_overridden", "INTEGER"),
+            ("schema_version", "TEXT"),
+            ("entrainment_method", "TEXT"),
+        ]:
+            try:
+                if USE_SUPABASE:
+                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN IF NOT EXISTS {col} {typ}")
+                else:
+                    cur.execute(f"ALTER TABLE avalanches ADD COLUMN {col} {typ}")
+            except:
+                pass
+        conn.commit()
+
+        # Fetch all records
+        if USE_SUPABASE:
+            cur.execute("SELECT id, calculated_d_size, mass_tonnes, total_mass, volume_m3, method, notes, report_link FROM avalanches")
+        else:
+            cur.execute("SELECT id, calculated_d_size, mass_tonnes, total_mass, volume_m3, method, notes, report_link FROM avalanches")
+        rows = cur.fetchall()
+
+        updated = 0
+        links_backfilled = 0
+
+        for row in rows:
+            if USE_SUPABASE:
+                id_, old_calc, mass_t, total_m, vol, meth, notes, rpt = row
+            else:
+                id_, old_calc, mass_t, total_m, vol, meth, notes, rpt = row
+
+            mass = (total_m or mass_t or 0)
+            volume = (vol or 0)
+            method_str = str(meth or '').lower()
+            notes = str(notes or '')
+
+            # Compute fresh values using current bins
+            mass_mid = calcs.mass_to_dsize(mass)['label'] if mass > 0 else None
+            vol_mid = calcs.volume_m3_to_dsize(volume)['label'] if volume > 0 else None
+
+            is_runout = any(k in method_str for k in ['runout', 'debris', 'volume'])
+
+            # 1. Store historical value into dsize_mass_original (only if we have an old value)
+            if old_calc:
+                if USE_SUPABASE:
+                    cur.execute("UPDATE avalanches SET dsize_mass_original = %s WHERE id = %s", (old_calc, id_))
+                else:
+                    cur.execute("UPDATE avalanches SET dsize_mass_original = ? WHERE id = ?", (old_calc, id_))
+
+            # 2. Write the recalculated midpoint values
+            if mass_mid:
+                if USE_SUPABASE:
+                    cur.execute("UPDATE avalanches SET dsize_mass_midpoint = %s WHERE id = %s", (mass_mid, id_))
+                else:
+                    cur.execute("UPDATE avalanches SET dsize_mass_midpoint = ? WHERE id = ?", (mass_mid, id_))
+
+            if vol_mid:
+                if USE_SUPABASE:
+                    cur.execute("UPDATE avalanches SET dsize_volume_midpoint = %s WHERE id = %s", (vol_mid, id_))
+                else:
+                    cur.execute("UPDATE avalanches SET dsize_volume_midpoint = ? WHERE id = ?", (vol_mid, id_))
+
+            # 3. Update the "current" calculated_d_size + method
+            if is_runout and vol_mid:
+                if USE_SUPABASE:
+                    cur.execute("UPDATE avalanches SET calculated_d_size = %s, dsize_method = %s WHERE id = %s",
+                                (vol_mid, "volume_midpoint", id_))
+                else:
+                    cur.execute("UPDATE avalanches SET calculated_d_size = ?, dsize_method = ? WHERE id = ?",
+                                (vol_mid, "volume_midpoint", id_))
+            elif mass_mid:
+                if USE_SUPABASE:
+                    cur.execute("UPDATE avalanches SET calculated_d_size = %s, dsize_method = %s WHERE id = %s",
+                                (mass_mid, "mass_midpoint", id_))
+                else:
+                    cur.execute("UPDATE avalanches SET calculated_d_size = ?, dsize_method = ? WHERE id = ?",
+                                (mass_mid, "mass_midpoint", id_))
+
+            # 4. Backfill report_link from notes
+            if (not rpt or str(rpt).strip() == '') and notes:
+                urls = url_pattern.findall(notes)
+                if urls:
+                    first = urls[0]
+                    if USE_SUPABASE:
+                        cur.execute("UPDATE avalanches SET report_link = %s WHERE id = %s", (first, id_))
+                    else:
+                        cur.execute("UPDATE avalanches SET report_link = ? WHERE id = ?", (first, id_))
+                    links_backfilled += 1
+
+            updated += 1
+
+        conn.commit()
+        print(f"[D-Size Migration] Processed {updated} records. Backfilled {links_backfilled} report_link(s) from notes.")
+    except Exception as e:
+        print(f"[D-Size Migration] Error: {e}")
+    finally:
+        cur.close()
+        conn.close()

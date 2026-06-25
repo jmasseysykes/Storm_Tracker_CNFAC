@@ -55,3 +55,29 @@ Original Storm Tracker spreadsheet developed by Jason Konigsberg and Spencer Log
 -Powered by public NRCS SNOTEL data.
 
 Questions or feedback? Open an issue or reach out via GitHub.
+
+## Testing the D-Size Calculator (V2.0)
+V2.0 (2026) introduces a unified "Start Zone Method" (slab dimensions + optional polygon area override, with simple grain/hardness or detailed layers or SWE) + "Runout/Debris Method" (volume-first).
+
+### Unit Tests
+```bash
+pip install -r requirements.txt
+python -m pytest tests/ -q
+```
+The tests cover mass/volume binning, uncertainty (RSS), entrainment, and density lookups.
+
+### V2 Test Dataset
+A synthetic dataset covering **all major input combinations** is included:
+```bash
+python tests/generate_v2_test_data.py   # regenerates tests/v2_test_data.csv if needed
+```
+- 7 records exercising:
+  - Start Zone: Simple vs Detailed layers, SWE (manual), with/without entrainment
+  - Runout: with and without custom density
+  - Area override, different D-sizes, non-default uncertainties
+- Use it to:
+  - Manually test the full UI flow
+  - Verify DB round-trips and display
+  - Test against the live schema
+
+The research DB uses `schema_version = "2.0"` and consistent fields for analysis. Old records are preserved.

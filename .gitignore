@@ -1,57 +1,145 @@
-# Create or append to .gitignore
-cat << 'EOF' >> .gitignore
-# Jupyter / notebooks
-*.ipynb
-*.ipynb_checkpoints/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Data / generated
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+cython_debug/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+# Local DB (use migrations or separate test DBs)
+avalanche_log.db
+*.db
+
+# Generated data (keep only the test dataset and essential station list)
 *.csv
+!SNOTEL_station_list.csv
+!tests/v2_test_data.csv
 *.xlsx
 *.png
 !StormTracker_Screenshot.png
-*.log
+!dsize_*.png
 temp_plot.png
-
-# Old / test scripts
-*test.py
-*v1.*.py
-untitled.py
-
-# R / misc
-.Rhistory
-EOF# Python / temp
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.coverage
-
-# Jupyter / notebooks
-*.ipynb_checkpoints/
-*.ipynb
-
-# Data / generated files
-# Ignore generated/output CSVs (keep essential ones like station lists)
-*.csv
-!SNOTEL_station_list.csv
-output/*.csv
-data/*.csv
-*.xlsx
-*.png
-*.log
-data/
-output/
 temp/
 plots/
+output/
+data/
 
-# Old/test scripts
+# Old / legacy scripts
 *test.py
 *v1.*.py
-untitled.py
+untitled*.py
+storm_tracker_app_v*.py
 
-# Editor/OS
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+# R
+.Rhistory
+.RData
