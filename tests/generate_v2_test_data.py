@@ -125,6 +125,7 @@ def generate_test_records():
         "total_mass": mass,
         "density_kgm3": dens,
         "use_layered_density": True,
+        "slab_layers_json": '[{"thickness_cm": 50, "hardness": "4F", "grain": "Rounded Grains (RG)"}, {"thickness_cm": 30, "hardness": "1F", "grain": "Faceted Crystals (FC)"}]',
         "hardness": None,
         "grain": None,
         "slab_swe_mm": None,

@@ -31,7 +31,7 @@ AVALANCHE_COLUMNS = frozenset([
     "adjusted_swe_mm", "burial_depth_ref_m", "unc_lw_pct", "unc_depth_pct",
     "unc_density_pct", "unc_area_pct", "unc_swe_pct", "unc_entrainment_pct",
     "unc_runout_pct", "notes", "report_link", "crown_depth_direct_m",
-    "geometry_mode", "density_mode", "density_profile",
+    "geometry_mode", "density_mode", "density_profile", "slab_layers_json",
     "swe_source", "area_overridden", "schema_version",
     "entrainment_method",
 ])
@@ -308,6 +308,7 @@ def init_db():
             ("geometry_mode", "TEXT"),
             ("density_mode", "TEXT"),
             ("density_profile", "TEXT"),
+            ("slab_layers_json", "TEXT"),
             ("swe_source", "TEXT"),
             ("area_overridden", "INTEGER"),
             ("schema_version", "TEXT"),

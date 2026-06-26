@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import pandas as pd
 from datetime import date
@@ -163,12 +164,31 @@ def _refresh_start_zone_fields(selected_data: dict) -> dict:
 
 
 # Practitioner-focused column order for the saved-avalanches viewer (full DB unchanged).
+def _format_slab_layers(layers_json):
+    """Human-readable summary of a multi-layer slab profile for the log viewer."""
+    if layers_json is None or (isinstance(layers_json, float) and pd.isna(layers_json)):
+        return None
+    try:
+        layers = json.loads(layers_json) if isinstance(layers_json, str) else layers_json
+    except (json.JSONDecodeError, TypeError):
+        return str(layers_json)
+    if not layers:
+        return None
+    parts = []
+    for ly in layers:
+        grain = ly.get("grain") or ""
+        if "(" in grain and grain.endswith(")"):
+            grain = grain[grain.rindex("(") + 1 : -1].strip()
+        parts.append(f"{ly.get('thickness_cm', '?')}cm {ly.get('hardness', '?')} {grain}".strip())
+    return " | ".join(parts)
+
+
 PRACTITIONER_VIEW_COLUMNS = [
     "timestamp", "observer", "location", "report_link", "method",
     "field_assessed_d_size", "dsize_mass_midpoint", "dsize_volume_midpoint",
     "total_mass", "mass_tonnes", "entrainment_mass",
     "volume_m3", "area_m2", "crown_width_m", "slab_length_m", "depth_m",
-    "hardness", "grain", "density_kgm3",
+    "hardness", "grain", "slab_layers", "density_kgm3",
     "entr_area_m2", "entr_hardness", "entr_swe_mm",
     "snotel_station", "weak_layer_date", "release_date",
     "slab_swe_mm", "adjusted_swe_mm",
@@ -183,8 +203,11 @@ def _load_log():
 
 def _build_practitioner_view(log_df: pd.DataFrame) -> pd.DataFrame:
     """Select and format columns for the practitioner-facing log viewer."""
-    available = [c for c in PRACTITIONER_VIEW_COLUMNS if c in log_df.columns]
-    display_df = log_df[available].copy()
+    view_df = log_df.copy()
+    if "slab_layers_json" in view_df.columns:
+        view_df["slab_layers"] = view_df["slab_layers_json"].map(_format_slab_layers)
+    available = [c for c in PRACTITIONER_VIEW_COLUMNS if c in view_df.columns]
+    display_df = view_df[available].copy()
     if "timestamp" in display_df.columns:
         display_df["timestamp"] = pd.to_datetime(display_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
     return display_df
@@ -277,6 +300,7 @@ def render_save_section(prefix=""):
                 "grain": selected_data.get("grain"),
                 "density_kgm3": selected_data.get("density_kgm3"),
                 "use_layered_density": selected_data.get("use_layered_density"),
+                "slab_layers_json": selected_data.get("slab_layers_json"),
                 
                 # (Legacy detailed/SNOTEL fields - populated if present)
                 "weak_layer_date": selected_data.get("weak_layer_date"),
@@ -749,6 +773,11 @@ with tab_start:
         density_profile = st.session_state.get("sz_density_profile") if dens_mode == "Layer density + grain type" else None
         swe_source = st.session_state.get("sz_swe_src") if dens_mode == "SWE based density estimate" else None
         entr_method_saved = st.session_state.get("sz_entr_method") if include_entr else None
+        slab_layers_json = None
+        if use_layered:
+            layers_saved = st.session_state.get("sz_layers") or []
+            if layers_saved:
+                slab_layers_json = json.dumps(layers_saved)
 
         # Save to session for DB
         st.session_state.start_zone_inputs = {
@@ -770,6 +799,7 @@ with tab_start:
             "total_mass": total_m,
             "density_kgm3": dens_for_store,
             "use_layered_density": use_layered,
+            "slab_layers_json": slab_layers_json,
             "hardness": hardness,
             "grain": grain,
             # slab_swe_mm = raw SNOTEL delta (or manual entry); adjusted_swe_mm = value used for mass
@@ -1027,6 +1057,7 @@ with tab_log:
                 "depth_m": st.column_config.NumberColumn("Depth (m)", format="%.2f"),
                 "hardness": st.column_config.TextColumn("Hardness"),
                 "grain": st.column_config.TextColumn("Grain Type"),
+                "slab_layers": st.column_config.TextColumn("Slab Layers"),
                 "density_kgm3": st.column_config.NumberColumn("Slab Density (kg/m³)", format="%.0f"),
                 "entr_area_m2": st.column_config.NumberColumn("Entrainment Area (m²)", format="%.0f"),
                 "entr_hardness": st.column_config.TextColumn("Entrainment Hardness"),
@@ -1061,6 +1092,7 @@ with tab_log:
             "depth_m": "Depth (m)",
             "hardness": "Hardness",
             "grain": "Grain Type",
+            "slab_layers": "Slab Layers",
             "density_kgm3": "Slab Density (kg/m³)",
             "entr_area_m2": "Entrainment Area (m²)",
             "entr_hardness": "Entrainment Hardness",
