@@ -466,23 +466,74 @@ with tab_start:
             station_name = "Manual"
         else:
             sel = st.selectbox("SNOTEL Station (Slab)", station_options, key="sz_snotel_sel")
-            w_date = st.date_input("Weak layer / start of slab accumulation", value=date(2024, 12, 1), key="sz_weak")
-            r_date = st.date_input("Release date", value=date.today(), key="sz_release")
+            w_date = st.date_input(
+                "Weak layer / start of slab accumulation",
+                value=date(2024, 12, 1),
+                key="sz_weak",
+            )
+            r_date = st.date_input(
+                "Avalanche release date (end of slab accumulation)",
+                value=date(2025, 1, 25),
+                key="sz_release",
+                help=(
+                    "The date the avalanche released — or the last day new snow was added to the slab. "
+                    "Do not use today's date for past avalanches; late-season dates often show 0 SWE "
+                    "after the snowpack has melted."
+                ),
+            )
             adj = st.slider("Local adjustment to SWE (%)", -50, 50, 0, key="sz_swe_adj")
+            slab_snotel_data = None
             if sel and stations_df is not None and "ID" in stations_df.columns:
                 try:
                     row = stations_df[stations_df["display_name"] == sel].iloc[0]
                     triplet = f"{row['ID']}:{row['state']}:SNTL"
-                    data = snotel.get_slab_swe(triplet, str(w_date), str(r_date))
-                    base = data.get("slab_swe_mm", 0) if isinstance(data, dict) else 0
-                    swe_mm = base * (1 + adj / 100.0)
+                    slab_snotel_data = snotel.get_slab_swe(triplet, str(w_date), str(r_date))
+                    if isinstance(slab_snotel_data, dict) and "error" in slab_snotel_data:
+                        st.warning(f"SNOTEL fetch issue: {slab_snotel_data['error']}")
+                        swe_mm = 0.0
+                    else:
+                        base = slab_snotel_data.get("slab_swe_mm", 0.0)
+                        swe_mm = base * (1 + adj / 100.0)
+                        weak_disp = slab_snotel_data.get("swe_weak_mm", 0.0)
+                        rel_disp = slab_snotel_data.get("swe_release_mm", 0.0)
+                        base_in = slab_snotel_data.get("slab_swe_in", base / 25.4)
+                        period_days = slab_snotel_data.get("period_days", (r_date - w_date).days)
+                        st.caption(
+                            f"SNOTEL SWE at weak layer ({w_date}): **{weak_disp:.1f} mm** "
+                            f"({slab_snotel_data.get('swe_weak_inches', 0):.1f}\") | "
+                            f"at release ({r_date}): **{rel_disp:.1f} mm** "
+                            f"({slab_snotel_data.get('swe_release_inches', 0):.1f}\") | "
+                            f"**slab ΔSWE ({period_days}-day): {base_in:.2f}\" ({base:.1f} mm)**"
+                            + (f" → **{swe_mm:.1f} mm** after {adj:+d}% adjustment" if adj else "")
+                        )
+                        storm = slab_snotel_data.get("storm_totals")
+                        if storm:
+                            st.caption(
+                                f"Storm Tracker comparison at release "
+                                f"({storm.get('matched_date', r_date)}): "
+                                f"1-day **{storm['1-day_in']:.2f}\"** | "
+                                f"3-day **{storm['3-day_in']:.2f}\"** | "
+                                f"7-day **{storm['7-day_in']:.2f}\"** | "
+                                f"10-day **{storm['10-day_in']:.2f}\"**"
+                            )
+                            st.caption(
+                                "Slab ΔSWE uses your weak-layer → release dates. "
+                                "Storm Tracker rolling totals look back from the release date only."
+                            )
+                        for warn in slab_snotel_data.get("warnings", []):
+                            st.warning(warn)
+                        if base <= 0:
+                            st.error(
+                                "Slab SWE is zero — mass cannot be estimated from SNOTEL with these dates. "
+                                "Set the release date to the avalanche date (when the slab was still present)."
+                            )
                     station_name = sel.split(" - ")[0] if " - " in sel else sel
                 except Exception as ex:
                     st.warning(f"SNOTEL fetch issue: {ex}")
-                    swe_mm = 0
+                    swe_mm = 0.0
                     station_name = sel
             else:
-                swe_mm = 0
+                swe_mm = 0.0
         # With direct crown depth (Step 1) + SWE we compute mass directly + implied density.
         # (Hand hardness + grain is only for the "Layer density + grain type" path when no SWE is available.)
         density = 250.0
@@ -559,10 +610,49 @@ with tab_start:
         depth_note = "direct field estimate"
         vol_m3 = area_m2 * crown_depth_m
 
-        # Mass
+        # Mass — re-fetch SNOTEL at calculate time (same pattern as V1) so results match displayed dates
+        calc_swe_mm = swe_mm
+        calc_density = density
+        weak_layer_date_str = None
+        release_date_str = None
+        base_slab_swe_mm = None
         if use_swe_for_mass:
-            slab_m = area_m2 * (swe_mm / 1000.0)
-            dens_for_store = density  # the derivation one
+            swe_src_calc = st.session_state.get("sz_swe_src", "Manual entry")
+            if swe_src_calc == "SNOTEL station" and stations_df is not None:
+                sel_calc = st.session_state.get("sz_snotel_sel")
+                w_date_calc = st.session_state.get("sz_weak")
+                r_date_calc = st.session_state.get("sz_release")
+                adj_calc = st.session_state.get("sz_swe_adj", 0)
+                weak_layer_date_str = str(w_date_calc) if w_date_calc else None
+                release_date_str = str(r_date_calc) if r_date_calc else None
+                if sel_calc:
+                    try:
+                        row = stations_df[stations_df["display_name"] == sel_calc].iloc[0]
+                        triplet = f"{row['ID']}:{row['state']}:SNTL"
+                        slab_data = snotel.get_slab_swe(triplet, weak_layer_date_str, release_date_str)
+                        if isinstance(slab_data, dict) and "error" not in slab_data:
+                            base_slab_swe_mm = slab_data.get("slab_swe_mm", 0.0)
+                            calc_swe_mm = base_slab_swe_mm * (1 + adj_calc / 100.0)
+                            if crown_depth_m > 0 and calc_swe_mm > 0:
+                                calc_density = calc_swe_mm / crown_depth_m
+                            for warn in slab_data.get("warnings", []):
+                                st.warning(warn)
+                        else:
+                            err = slab_data.get("error", "unknown error") if isinstance(slab_data, dict) else "fetch failed"
+                            st.error(f"SNOTEL fetch failed at calculate: {err}")
+                            calc_swe_mm = 0.0
+                    except Exception as ex:
+                        st.error(f"SNOTEL fetch failed at calculate: {ex}")
+                        calc_swe_mm = 0.0
+            if calc_swe_mm <= 0:
+                st.error(
+                    "Slab SWE is zero — cannot estimate mass. "
+                    "Check that the release date is the avalanche date (not today's date)."
+                )
+
+        if use_swe_for_mass:
+            slab_m = area_m2 * (calc_swe_mm / 1000.0)
+            dens_for_store = calc_density
         else:
             slab_m = vol_m3 * density / 1000.0
             dens_for_store = density
@@ -613,7 +703,11 @@ with tab_start:
             f"Slab area used: **{area_m2:,.0f} m²** ({area_used_display:,.0f} {unit_area}) — {area_note}"
         )
         if dens_mode == "SWE based density estimate":
-            st.caption(f"Crown depth used: **{crown_depth_m:.2f} m** (direct) | Implied density from SWE: **{density:.0f} kg/m³**")
+            st.caption(
+                f"Crown depth used: **{crown_depth_m:.2f} m** (direct) | "
+                f"Slab SWE used: **{calc_swe_mm:.1f} mm** | "
+                f"Implied density from SWE: **{calc_density:.0f} kg/m³**"
+            )
         else:
             st.caption(f"Crown depth used for volume: **{crown_depth_m:.2f} m** ({depth_note})")
 
@@ -651,7 +745,10 @@ with tab_start:
             "use_layered_density": use_layered,
             "hardness": hardness,
             "grain": grain,
-            "slab_swe_mm": swe_mm if use_swe_for_mass else None,
+            "slab_swe_mm": calc_swe_mm if use_swe_for_mass else None,
+            "adjusted_swe_mm": calc_swe_mm if use_swe_for_mass else None,
+            "weak_layer_date": weak_layer_date_str,
+            "release_date": release_date_str,
             "snotel_station": station_name,
             "include_entrainment": include_entr,
             "entrainment_method": entrainment_method_choice,
