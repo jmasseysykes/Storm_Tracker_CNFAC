@@ -162,6 +162,34 @@ def _refresh_start_zone_fields(selected_data: dict) -> dict:
     return updated
 
 
+# Practitioner-focused column order for the saved-avalanches viewer (full DB unchanged).
+PRACTITIONER_VIEW_COLUMNS = [
+    "timestamp", "observer", "location", "report_link", "method",
+    "field_assessed_d_size", "dsize_mass_midpoint", "dsize_volume_midpoint",
+    "total_mass", "mass_tonnes", "entrainment_mass",
+    "volume_m3", "area_m2", "crown_width_m", "slab_length_m", "depth_m",
+    "hardness", "grain", "density_kgm3",
+    "entr_area_m2", "entr_hardness", "entr_swe_mm",
+    "snotel_station", "weak_layer_date", "release_date",
+    "slab_swe_mm", "adjusted_swe_mm",
+    "unc_low", "unc_high", "notes",
+]
+
+
+@st.cache_data(ttl=60)
+def _load_log():
+    return db.load_avalanche_log()
+
+
+def _build_practitioner_view(log_df: pd.DataFrame) -> pd.DataFrame:
+    """Select and format columns for the practitioner-facing log viewer."""
+    available = [c for c in PRACTITIONER_VIEW_COLUMNS if c in log_df.columns]
+    display_df = log_df[available].copy()
+    if "timestamp" in display_df.columns:
+        display_df["timestamp"] = pd.to_datetime(display_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+    return display_df
+
+
 # ====================== TABS ======================
 tab_start, tab_runout, tab_log = st.tabs([
     "Start Zone Method",
@@ -290,7 +318,8 @@ def render_save_section(prefix=""):
                 st.error(f"Could not save to the research database: {e}")
                 st.stop()
             st.success(f"✅ {save_choice} saved successfully!")
-            
+            _load_log.clear()
+
             # Clear all session states
             for key in ["start_zone_inputs", "runout_inputs", "quick_inputs", "detailed_inputs"]:
                 st.session_state.pop(key, None)
@@ -468,7 +497,7 @@ with tab_start:
             sel = st.selectbox("SNOTEL Station (Slab)", station_options, key="sz_snotel_sel")
             w_date = st.date_input(
                 "Weak layer / start of slab accumulation",
-                value=date(2024, 12, 1),
+                value=date(2025, 1, 1),
                 key="sz_weak",
             )
             r_date = st.date_input(
@@ -958,155 +987,102 @@ with tab_runout:
 
 # ====================== VIEW LOG TAB ======================
 with tab_log:
-    st.subheader("📋 Research Database — Saved Avalanches")
-    @st.cache_data(ttl=300)  # cache 5 min to reduce DB load/memory
-    def _load_log():
-        return db.load_avalanche_log()
+    st.subheader("📋 Saved Avalanches")
+    st.caption(
+        "Practitioner view — key fields only. The full research database in Supabase "
+        "is unchanged and retains all columns for analysis."
+    )
+
+    refresh_col, _ = st.columns([1, 4])
+    with refresh_col:
+        if st.button("🔄 Refresh list", key="log_refresh_btn"):
+            _load_log.clear()
+            st.rerun()
+
     log_df = _load_log()
-   
+
     if log_df.empty:
         st.info("No avalanches saved yet. Calculate and save some entries to build the database!")
     else:
-        # Show migration status
-        if 'dsize_method' in log_df.columns:
-            unmigrated = log_df[log_df['dsize_method'].isna() | (log_df['dsize_method'] == '')].shape[0]
-            if unmigrated > 0:
-                st.info(f"{unmigrated} records have not been migrated yet to the midpoint columns. Run 'Calculate' + Save on old entries or restart the app to trigger migration.")
-        st.caption("V2 records (schema_version='2.0') use the consistent naming scheme. The table and CSV list columns in the clean V2-preferred order. Legacy columns from earlier versions are preserved for historical data.")
-        preferred_order = [
-            "timestamp", "observer", "location", "report_link", "schema_version", "method",
-            "geometry_mode", "density_mode", "density_profile", "swe_source",
-            "area_overridden", "entrainment_method_choice", "entrainment_method",
-            "calculated_d_size", "dsize_method",
-            "dsize_mass_original", "dsize_mass_midpoint", "dsize_volume_midpoint",
-            "field_assessed_d_size",
-            "total_mass", "mass_tonnes", "entrainment_mass",
-            "area_m2", "volume_m3",
-            "crown_width_m", "slab_length_m", "depth_m",
-            "crown_depth_direct_m", "crown_depth_derived_m",
-            "hardness", "grain", "density_kgm3", "debris_type",
-            "use_layered_density", "include_entrainment",
-            "entr_width_m", "entr_length_m", "entr_area_m2", "entr_depth_m",
-            "entr_hardness", "entr_grain", "entr_swe_mm",
-            "snotel_station", "weak_layer_date", "release_date",
-            "slab_swe_mm", "adjusted_swe_mm",
-            "unc_lw_pct", "unc_depth_pct", "unc_density_pct",
-            "unc_area_pct", "unc_swe_pct", "unc_entrainment_pct", "unc_runout_pct",
-            "unc_low", "unc_high", "notes"
-        ]
-       
-        available_cols = [col for col in preferred_order if col in log_df.columns]
-        display_df = log_df[available_cols].copy()
+        display_df = _build_practitioner_view(log_df)
 
-        # The three explicit D-size columns are now stored.
-        # We keep a simple fallback column for very old records.
-        try:
-            def get_fallback(row):
-                mass = row.get("mass_tonnes") or row.get("total_mass")
-                vol = row.get("volume_m3")
-                if pd.notna(vol) and vol > 0:
-                    return calcs.volume_m3_to_dsize(vol)["label"]
-                return calcs.get_current_mass_dsize(mass)
-            display_df["dsize_fallback"] = display_df.apply(get_fallback, axis=1)
-        except Exception:
-            pass  # fail gracefully
-       
-        if "timestamp" in display_df.columns:
-            display_df["timestamp"] = pd.to_datetime(display_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
-
-        # Rename columns ONLY for display and CSV export.
-        # This presents a clean, consistent naming scheme on the site and downloads
-        # without touching the underlying database (old data and column names are preserved).
-        display_rename = {
-            "unc_lw_pct": "unc_slab_lw_pct",
-            "unc_area_pct": "unc_slab_area_pct",
-            "unc_depth_pct": "unc_slab_depth_pct",
-            "unc_density_pct": "unc_slab_density_pct",
-            "unc_swe_pct": "unc_slab_swe_pct",
-            "density_kgm3": "slab_density_kg_m3",
-            "unc_low": "dsize_unc_low",
-            "unc_high": "dsize_unc_high",
-            "calculated_d_size": "dsize_calculated",
-            "area_m2": "slab_area_m2",
-            "volume_m3": "slab_volume_m3",
-            "mass_tonnes": "slab_mass_t",
-            "total_mass": "total_mass_t",
-            "entrainment_mass": "entrainment_mass_t",
-        }
-        display_df = display_df.rename(columns=display_rename)
-       
         st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "timestamp": st.column_config.TextColumn("Date/Time"),
+                "observer": st.column_config.TextColumn("Observer"),
+                "location": st.column_config.TextColumn("Location"),
                 "report_link": st.column_config.LinkColumn("Avalanche Report", display_text="🔗 Open Report"),
-                "schema_version": st.column_config.TextColumn("Schema Version"),
                 "method": st.column_config.TextColumn("Method"),
-                "geometry_mode": st.column_config.TextColumn("Geometry Mode"),
-                "density_mode": st.column_config.TextColumn("Density Mode"),
-                "density_profile": st.column_config.TextColumn("Density Profile"),
-                "swe_source": st.column_config.TextColumn("SWE Source"),
-                "area_overridden": st.column_config.TextColumn("Area Overridden?"),
-                "entrainment_method_choice": st.column_config.TextColumn("Entrainment Method Choice"),
-                "entrainment_method": st.column_config.TextColumn("Entrainment Method"),
-                "dsize_calculated": st.column_config.TextColumn("D-size (calculated)"),
-                "dsize_method": st.column_config.TextColumn("D-size Method"),
-                "dsize_mass_original": st.column_config.TextColumn("D-size Mass (original)"),
-                "dsize_mass_midpoint": st.column_config.TextColumn("D-size Mass (midpoint)"),
-                "dsize_volume_midpoint": st.column_config.TextColumn("D-size Volume (midpoint)"),
-                "field_assessed_d_size": st.column_config.TextColumn("Field-Assessed D-Size"),
-                "total_mass_t": st.column_config.NumberColumn("Total Mass (t)", format="%.0f"),
-                "slab_mass_t": st.column_config.NumberColumn("Slab Mass (t)", format="%.0f"),
-                "entrainment_mass_t": st.column_config.NumberColumn("Entrained Mass (t)", format="%.0f"),
-                "slab_area_m2": st.column_config.NumberColumn("Slab Area (m²)", format="%.0f"),
-                "slab_volume_m3": st.column_config.NumberColumn("Slab Volume (m³)", format="%.0f"),
+                "field_assessed_d_size": st.column_config.TextColumn("D-Size (Field)"),
+                "dsize_mass_midpoint": st.column_config.TextColumn("D-Size (Mass)"),
+                "dsize_volume_midpoint": st.column_config.TextColumn("D-Size (Volume)"),
+                "total_mass": st.column_config.NumberColumn("Total Mass (t)", format="%.0f"),
+                "mass_tonnes": st.column_config.NumberColumn("Slab Mass (t)", format="%.0f"),
+                "entrainment_mass": st.column_config.NumberColumn("Entrained Mass (t)", format="%.0f"),
+                "volume_m3": st.column_config.NumberColumn("Slab Volume (m³)", format="%.0f"),
+                "area_m2": st.column_config.NumberColumn("Slab Area (m²)", format="%.0f"),
                 "crown_width_m": st.column_config.NumberColumn("Crown Width (m)", format="%.0f"),
                 "slab_length_m": st.column_config.NumberColumn("Slab Length (m)", format="%.0f"),
-                "slab_depth_m": st.column_config.NumberColumn("Slab Depth (m)", format="%.2f"),
-                "crown_depth_direct_m": st.column_config.NumberColumn("Crown Depth Direct (m)", format="%.2f"),
-                "crown_depth_derived_m": st.column_config.NumberColumn("Crown Depth Derived (m)", format="%.2f"),
+                "depth_m": st.column_config.NumberColumn("Depth (m)", format="%.2f"),
                 "hardness": st.column_config.TextColumn("Hardness"),
                 "grain": st.column_config.TextColumn("Grain Type"),
-                "slab_density_kg_m3": st.column_config.NumberColumn("Slab Density (kg/m³)", format="%.0f"),
-                "debris_type": st.column_config.TextColumn("Debris Type"),
-                "use_layered_density": st.column_config.TextColumn("Use Layered Density"),
-                "include_entrainment": st.column_config.TextColumn("Include Entrainment"),
-                "entr_width_m": st.column_config.NumberColumn("Entrainment Width (m)", format="%.0f"),
-                "entr_length_m": st.column_config.NumberColumn("Entrainment Length (m)", format="%.0f"),
+                "density_kgm3": st.column_config.NumberColumn("Slab Density (kg/m³)", format="%.0f"),
                 "entr_area_m2": st.column_config.NumberColumn("Entrainment Area (m²)", format="%.0f"),
-                "entr_depth_m": st.column_config.NumberColumn("Entrainment Depth (m)", format="%.2f"),
                 "entr_hardness": st.column_config.TextColumn("Entrainment Hardness"),
-                "entr_grain": st.column_config.TextColumn("Entrainment Grain"),
                 "entr_swe_mm": st.column_config.NumberColumn("Entrainment SWE (mm)", format="%.1f"),
                 "snotel_station": st.column_config.TextColumn("SNOTEL Station"),
                 "weak_layer_date": st.column_config.TextColumn("Weak Layer Date"),
                 "release_date": st.column_config.TextColumn("Release Date"),
                 "slab_swe_mm": st.column_config.NumberColumn("Slab SWE (mm)", format="%.1f"),
                 "adjusted_swe_mm": st.column_config.NumberColumn("Adjusted SWE (mm)", format="%.1f"),
-                "unc_slab_lw_pct": st.column_config.NumberColumn("Unc. Slab LW %", format="%.1f"),
-                "unc_slab_area_pct": st.column_config.NumberColumn("Unc. Slab Area %", format="%.1f"),
-                "unc_slab_depth_pct": st.column_config.NumberColumn("Unc. Slab Depth %", format="%.1f"),
-                "unc_slab_density_pct": st.column_config.NumberColumn("Unc. Slab Density %", format="%.1f"),
-                "unc_slab_swe_pct": st.column_config.NumberColumn("Unc. Slab SWE %", format="%.1f"),
-                "unc_entrainment_pct": st.column_config.NumberColumn("Unc. Entrainment %", format="%.1f"),
-                "unc_runout_pct": st.column_config.NumberColumn("Unc. Runout %", format="%.1f"),
-                "dsize_unc_low": st.column_config.TextColumn("D-size Uncertainty Low"),
-                "dsize_unc_high": st.column_config.TextColumn("D-size Uncertainty High"),
+                "unc_low": st.column_config.TextColumn("D-Size Uncertainty Low"),
+                "unc_high": st.column_config.TextColumn("D-Size Uncertainty High"),
                 "notes": st.column_config.TextColumn("Notes"),
-                "dsize_fallback": st.column_config.TextColumn("D-size (fallback)"),
-            }
+            },
         )
-       
+
+        export_df = display_df.rename(columns={
+            "timestamp": "Date/Time",
+            "observer": "Observer",
+            "location": "Location",
+            "report_link": "Avalanche Report",
+            "method": "Method",
+            "field_assessed_d_size": "D-Size (Field)",
+            "dsize_mass_midpoint": "D-Size (Mass)",
+            "dsize_volume_midpoint": "D-Size (Volume)",
+            "total_mass": "Total Mass (t)",
+            "mass_tonnes": "Slab Mass (t)",
+            "entrainment_mass": "Entrained Mass (t)",
+            "volume_m3": "Slab Volume (m³)",
+            "area_m2": "Slab Area (m²)",
+            "crown_width_m": "Crown Width (m)",
+            "slab_length_m": "Slab Length (m)",
+            "depth_m": "Depth (m)",
+            "hardness": "Hardness",
+            "grain": "Grain Type",
+            "density_kgm3": "Slab Density (kg/m³)",
+            "entr_area_m2": "Entrainment Area (m²)",
+            "entr_hardness": "Entrainment Hardness",
+            "entr_swe_mm": "Entrainment SWE (mm)",
+            "snotel_station": "SNOTEL Station",
+            "weak_layer_date": "Weak Layer Date",
+            "release_date": "Release Date",
+            "slab_swe_mm": "Slab SWE (mm)",
+            "adjusted_swe_mm": "Adjusted SWE (mm)",
+            "unc_low": "D-Size Uncertainty Low",
+            "unc_high": "D-Size Uncertainty High",
+            "notes": "Notes",
+        })
         st.download_button(
-            label="📥 Download Research Database as CSV (using clean column order)",
-            data=display_df.to_csv(index=False).encode(),
-            file_name="avalanche_research_log.csv",
-            mime="text/csv"
+            label="📥 Download practitioner view as CSV",
+            data=export_df.to_csv(index=False).encode(),
+            file_name="avalanche_log_practitioner_view.csv",
+            mime="text/csv",
         )
-        st.caption("Columns shown and exported use clean, consistent names for V2 (and mapped legacy). The actual database columns are unchanged to preserve all historical data.")
-       
+
         st.caption(f"Total records in database: **{len(log_df)}**")
 
 # ====================== FOOTER ======================
