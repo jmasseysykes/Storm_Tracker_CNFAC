@@ -715,7 +715,10 @@ with tab_start:
             src = entr_res.get("source", "")
             st.caption(f"Entrainment: {entr_res.get('entr_area_m2',0):,.0f} m² × SWE {entr_res.get('entr_swe_mm',0):,.1f} mm (source: {src})")
             for n in entr_res.get("notes", []):
-                st.caption(n) if "large" not in n.lower() else st.warning(n)
+                if "large" in n.lower():
+                    st.warning(n)
+                else:
+                    st.caption(n)
 
         # Capture method choices for research database (to distinguish "quick" vs "detailed" approaches)
         density_profile = st.session_state.get("sz_density_profile") if dens_mode == "Layer density + grain type" else None
