@@ -127,7 +127,7 @@ def _refresh_start_zone_fields(selected_data: dict) -> dict:
     vol_m3 = area_m2 * depth_m if depth_m else selected_data.get("volume_m3")
 
     density = selected_data.get("density_kgm3") or 250.0
-    swe_mm = selected_data.get("slab_swe_mm") or 0.0
+    swe_mm = selected_data.get("adjusted_swe_mm") or selected_data.get("slab_swe_mm") or 0.0
     dens_mode = selected_data.get("density_mode") or ""
 
     if dens_mode == "SWE based density estimate" and swe_mm > 0:
@@ -772,7 +772,10 @@ with tab_start:
             "use_layered_density": use_layered,
             "hardness": hardness,
             "grain": grain,
-            "slab_swe_mm": calc_swe_mm if use_swe_for_mass else None,
+            # slab_swe_mm = raw SNOTEL delta (or manual entry); adjusted_swe_mm = value used for mass
+            "slab_swe_mm": (
+                base_slab_swe_mm if base_slab_swe_mm is not None else calc_swe_mm
+            ) if use_swe_for_mass else None,
             "adjusted_swe_mm": calc_swe_mm if use_swe_for_mass else None,
             "weak_layer_date": weak_layer_date_str,
             "release_date": release_date_str,
