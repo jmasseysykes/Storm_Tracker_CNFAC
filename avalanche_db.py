@@ -21,7 +21,7 @@ else:
 AVALANCHE_COLUMNS = frozenset([
     "timestamp", "observer", "location", "method", "area_m2", "volume_m3",
     "mass_tonnes", "entrainment_mass", "total_mass", "calculated_d_size",
-    "original_calculated_d_size", "dsize_method", "dsize_mass_original",
+    "dsize_method", "dsize_mass_original",
     "dsize_mass_midpoint", "dsize_volume_midpoint", "unc_low", "unc_high",
     "field_assessed_d_size", "crown_width_m", "slab_length_m", "depth_m",
     "hardness", "grain", "density_kgm3", "use_layered_density",
@@ -31,7 +31,7 @@ AVALANCHE_COLUMNS = frozenset([
     "adjusted_swe_mm", "burial_depth_ref_m", "unc_lw_pct", "unc_depth_pct",
     "unc_density_pct", "unc_area_pct", "unc_swe_pct", "unc_entrainment_pct",
     "unc_runout_pct", "notes", "report_link", "crown_depth_direct_m",
-    "crown_depth_derived_m", "geometry_mode", "density_mode", "density_profile",
+    "geometry_mode", "density_mode", "density_profile",
     "swe_source", "area_overridden", "schema_version",
     "entrainment_method",
 ])
@@ -168,7 +168,6 @@ def init_db():
                     entrainment_mass REAL,
                     total_mass REAL,
                     calculated_d_size TEXT,
-                    original_calculated_d_size TEXT,
                     dsize_method TEXT,
                     dsize_mass_original TEXT,
                     dsize_mass_midpoint TEXT,
@@ -207,7 +206,6 @@ def init_db():
                     notes TEXT,
                     report_link TEXT,
                     crown_depth_direct_m REAL,
-                    crown_depth_derived_m REAL,
                     geometry_mode TEXT,
                     density_mode TEXT,
                     density_profile TEXT,
@@ -231,7 +229,6 @@ def init_db():
                     entrainment_mass REAL,
                     total_mass REAL,
                     calculated_d_size TEXT,
-                    original_calculated_d_size TEXT,
                     dsize_method TEXT,
                     dsize_mass_original TEXT,
                     dsize_mass_midpoint TEXT,
@@ -270,7 +267,6 @@ def init_db():
                     notes TEXT,
                     report_link TEXT,
                     crown_depth_direct_m REAL,
-                    crown_depth_derived_m REAL,
                     geometry_mode TEXT,
                     density_mode TEXT,
                     density_profile TEXT,
@@ -303,14 +299,12 @@ def init_db():
             ("unc_swe_pct", "REAL"),
             ("unc_entrainment_pct", "REAL"),
             ("unc_runout_pct", "REAL"),
-            ("original_calculated_d_size", "TEXT"),
             ("dsize_method", "TEXT"),
             ("report_link", "TEXT"),
             ("dsize_mass_original", "TEXT"),
             ("dsize_mass_midpoint", "TEXT"),
             ("dsize_volume_midpoint", "TEXT"),
             ("crown_depth_direct_m", "REAL"),
-            ("crown_depth_derived_m", "REAL"),
             ("geometry_mode", "TEXT"),
             ("density_mode", "TEXT"),
             ("density_profile", "TEXT"),
@@ -323,8 +317,13 @@ def init_db():
         for col_name, col_type in new_columns:
             _add_column_if_missing(cur, conn, col_name, col_type)
 
-        # Remove duplicate column — never populated; entrainment_method is canonical.
-        _drop_column_if_exists(cur, conn, "entrainment_method_choice")
+        # Remove unused/duplicate columns (never populated in production).
+        for legacy_col in (
+            "entrainment_method_choice",
+            "original_calculated_d_size",
+            "crown_depth_derived_m",
+        ):
+            _drop_column_if_exists(cur, conn, legacy_col)
 
         conn.commit()
     except Exception as e:
@@ -418,7 +417,6 @@ def migrate_dsize_calculations():
             ("report_link", "TEXT"),
             ("dsize_method", "TEXT"),
             ("crown_depth_direct_m", "REAL"),
-            ("crown_depth_derived_m", "REAL"),
             ("geometry_mode", "TEXT"),
             ("density_mode", "TEXT"),
             ("density_profile", "TEXT"),

@@ -261,7 +261,6 @@ def render_save_section(prefix=""):
                 "total_mass": selected_data.get("total_mass") or selected_data.get("mass_tonnes"),
                 "calculated_d_size": selected_data.get("calculated_d_size"),
                 "dsize_method": selected_data.get("dsize_method"),
-                "original_calculated_d_size": selected_data.get("original_calculated_d_size"),
                 "dsize_mass_original": selected_data.get("dsize_mass_original"),
                 "dsize_mass_midpoint": selected_data.get("dsize_mass_midpoint"),
                 "dsize_volume_midpoint": selected_data.get("dsize_volume_midpoint"),
@@ -274,7 +273,6 @@ def render_save_section(prefix=""):
                 "slab_length_m": selected_data.get("slab_length_m"),
                 "depth_m": selected_data.get("depth_m"),
                 "crown_depth_direct_m": selected_data.get("crown_depth_direct_m"),
-                "crown_depth_derived_m": selected_data.get("crown_depth_derived_m"),
                 "hardness": selected_data.get("hardness"),
                 "grain": selected_data.get("grain"),
                 "density_kgm3": selected_data.get("density_kgm3"),
@@ -422,7 +420,6 @@ with tab_start:
 
     density = 250.0
     swe_mm = 0.0
-    depth_derived_m = None
     use_layered = False
     station_name = None
     use_swe_for_mass = False
@@ -566,7 +563,6 @@ with tab_start:
         # With direct crown depth (Step 1) + SWE we compute mass directly + implied density.
         # (Hand hardness + grain is only for the "Layer density + grain type" path when no SWE is available.)
         density = 250.0
-        depth_derived_m = None
         if swe_mm > 0 and direct_depth_m > 0:
             # density_kg/m3 = (SWE in mm / depth in m) numerically, since mass/area in t/m2 / depth_m *1000 → kg/m3
             density = swe_mm / direct_depth_m
@@ -767,7 +763,6 @@ with tab_start:
             "volume_m3": vol_m3,
             "depth_m": crown_depth_m,
             "crown_depth_direct_m": direct_depth_m,
-            "crown_depth_derived_m": depth_derived_m,
             "crown_width_m": crown_width_m,
             "slab_length_m": slab_length_m,
             "mass_tonnes": slab_m,

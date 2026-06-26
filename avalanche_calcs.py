@@ -10,7 +10,7 @@ from typing import Optional, Any
 # - 'volume_midpoint' = log-midpoint binning for volume-based (Runout/Debris)
 # - 'mass_midpoint_historical' = special marker for old records with incomplete data (e.g. missing entrainment inputs)
 # Existing DB records have 'calculated_d_size' from previous binning.
-# We preserve history in 'original_calculated_d_size' and mark the method used.
+# Historical values are preserved in 'dsize_mass_original' (see avalanche_db migration).
 D_SIZE_RANGES = [
     {"label": "D1",   "min_t": 1.0,   "typical_t": 10,    "max_t": 17.8},
     {"label": "D1.5", "min_t": 17.8,  "typical_t": None,  "max_t": 56.2},
