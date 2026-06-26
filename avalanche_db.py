@@ -32,7 +32,7 @@ AVALANCHE_COLUMNS = frozenset([
     "unc_density_pct", "unc_area_pct", "unc_swe_pct", "unc_entrainment_pct",
     "unc_runout_pct", "notes", "report_link", "crown_depth_direct_m",
     "crown_depth_derived_m", "geometry_mode", "density_mode", "density_profile",
-    "swe_source", "entrainment_method_choice", "area_overridden", "schema_version",
+    "swe_source", "area_overridden", "schema_version",
     "entrainment_method",
 ])
 
@@ -87,6 +87,37 @@ def _add_column_if_missing(cur, conn, col_name, col_type):
             return False
         _ensure_connection_ready(conn)
         print(f"[init_db] Could not add column {col_name}: {e}")
+        return False
+
+
+def _column_exists(cur, col_name: str) -> bool:
+    if USE_SUPABASE:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'avalanches' AND column_name = %s
+            """,
+            (col_name,),
+        )
+        return cur.fetchone() is not None
+    cur.execute("PRAGMA table_info(avalanches)")
+    return any(row[1] == col_name for row in cur.fetchall())
+
+
+def _drop_column_if_exists(cur, conn, col_name: str) -> bool:
+    """Drop a legacy/unused column from existing databases."""
+    if not _column_exists(cur, col_name):
+        return False
+    try:
+        if USE_SUPABASE:
+            cur.execute(f"ALTER TABLE avalanches DROP COLUMN IF EXISTS {col_name}")
+        else:
+            cur.execute(f"ALTER TABLE avalanches DROP COLUMN {col_name}")
+        print(f"[init_db] Dropped unused column: {col_name}")
+        return True
+    except Exception as e:
+        _ensure_connection_ready(conn)
+        print(f"[init_db] Could not drop column {col_name}: {e}")
         return False
 
 
@@ -181,7 +212,6 @@ def init_db():
                     density_mode TEXT,
                     density_profile TEXT,
                     swe_source TEXT,
-                    entrainment_method_choice TEXT,
                     area_overridden INTEGER,
                     schema_version TEXT,
                     entrainment_method TEXT
@@ -245,7 +275,6 @@ def init_db():
                     density_mode TEXT,
                     density_profile TEXT,
                     swe_source TEXT,
-                    entrainment_method_choice TEXT,
                     area_overridden INTEGER,
                     schema_version TEXT,
                     entrainment_method TEXT
@@ -286,7 +315,6 @@ def init_db():
             ("density_mode", "TEXT"),
             ("density_profile", "TEXT"),
             ("swe_source", "TEXT"),
-            ("entrainment_method_choice", "TEXT"),
             ("area_overridden", "INTEGER"),
             ("schema_version", "TEXT"),
             ("entrainment_method", "TEXT"),
@@ -294,6 +322,9 @@ def init_db():
         
         for col_name, col_type in new_columns:
             _add_column_if_missing(cur, conn, col_name, col_type)
+
+        # Remove duplicate column — never populated; entrainment_method is canonical.
+        _drop_column_if_exists(cur, conn, "entrainment_method_choice")
 
         conn.commit()
     except Exception as e:
@@ -392,7 +423,6 @@ def migrate_dsize_calculations():
             ("density_mode", "TEXT"),
             ("density_profile", "TEXT"),
             ("swe_source", "TEXT"),
-            ("entrainment_method_choice", "TEXT"),
             ("area_overridden", "INTEGER"),
             ("schema_version", "TEXT"),
             ("entrainment_method", "TEXT"),

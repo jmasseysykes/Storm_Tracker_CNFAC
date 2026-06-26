@@ -253,7 +253,7 @@ def render_save_section(prefix=""):
                 "density_profile": selected_data.get("density_profile"),
                 "swe_source": selected_data.get("swe_source"),
                 "area_overridden": selected_data.get("area_overridden"),
-                "entrainment_method": selected_data.get("entrainment_method") or selected_data.get("entrainment_method_choice"),
+                "entrainment_method": selected_data.get("entrainment_method"),
                 "area_m2": selected_data.get("area_m2"),
                 "volume_m3": selected_data.get("volume_m3"),
                 "mass_tonnes": selected_data.get("mass_tonnes"),
@@ -752,7 +752,7 @@ with tab_start:
         # Capture method choices for research database (to distinguish "quick" vs "detailed" approaches)
         density_profile = st.session_state.get("sz_density_profile") if dens_mode == "Layer density + grain type" else None
         swe_source = st.session_state.get("sz_swe_src") if dens_mode == "SWE based density estimate" else None
-        entrainment_method_choice = st.session_state.get("sz_entr_method") if include_entr else None
+        entr_method_saved = st.session_state.get("sz_entr_method") if include_entr else None
 
         # Save to session for DB
         st.session_state.start_zone_inputs = {
@@ -783,7 +783,7 @@ with tab_start:
             "release_date": release_date_str,
             "snotel_station": station_name,
             "include_entrainment": include_entr,
-            "entrainment_method": entrainment_method_choice,
+            "entrainment_method": entr_method_saved,
             "entr_width_m": e_w * conv_length if include_entr else None,
             "entr_length_m": e_l * conv_length if include_entr else None,
             "entr_area_m2": entr_res.get("entr_area_m2"),
